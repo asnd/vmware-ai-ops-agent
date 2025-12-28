@@ -2,8 +2,8 @@
 AI Analysis engine for VMware infrastructure.
 """
 
-from .llm_engine import LLMAnalysisEngine
 from .knowledge_base import KnowledgeBase
+from .llm_engine import LLMAnalysisEngine
 from .models import AnalysisResult, PredictedFailure, RemediationPlan, RootCauseAnalysis
 
 __all__ = [

@@ -188,7 +188,9 @@ class PatternMatcher:
 
         return matches
 
-    def match_metrics(self, resources: list[ResourceHealth]) -> list[tuple[KnownPattern, list[ResourceHealth]]]:
+    def match_metrics(
+        self, resources: list[ResourceHealth]
+    ) -> list[tuple[KnownPattern, list[ResourceHealth]]]:
         matches = []
         for pattern in self.patterns:
             if not pattern.metric_conditions:

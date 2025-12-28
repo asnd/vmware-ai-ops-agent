@@ -77,7 +77,11 @@ class KnowledgeBase:
         if not self._initialized:
             return
 
-        document = f"Incident: {incident.summary}\nRoot Cause: {incident.root_cause}\nResolution: {incident.resolution}"
+        document = (
+            f"Incident: {incident.summary}\n"
+            f"Root Cause: {incident.root_cause}\n"
+            f"Resolution: {incident.resolution}"
+        )
 
         try:
             self._collection.add(
@@ -113,7 +117,9 @@ class KnowledgeBase:
             logger.error("Similarity search failed", error=str(e))
             return []
 
-    async def record_analysis(self, analysis: AnalysisResult, resolution: str | None = None) -> None:
+    async def record_analysis(
+        self, analysis: AnalysisResult, resolution: str | None = None
+    ) -> None:
         if not self._initialized:
             return
 

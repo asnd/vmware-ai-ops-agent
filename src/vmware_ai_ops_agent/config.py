@@ -27,7 +27,12 @@ class VRLIConfig(BaseModel):
     password: SecretStr = SecretStr("")
     verify_ssl: bool = True
     timeout: int = 30
-    query: dict[str, Any] = Field(default_factory=lambda: {"default_time_range": "LAST_1_HOUR", "max_results": 10000})
+    query: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "default_time_range": "LAST_1_HOUR",
+            "max_results": 10000,
+        }
+    )
 
 
 class LLMConfig(BaseModel):
@@ -57,8 +62,12 @@ class AutoRemediateConfig(BaseModel):
     enabled: bool = False
     require_approval: bool = True
     max_actions_per_hour: int = 10
-    allowed_actions: list[str] = Field(default_factory=lambda: ["vmotion", "drs_rebalance", "snapshot_cleanup"])
-    forbidden_actions: list[str] = Field(default_factory=lambda: ["vm_power_off", "host_maintenance_mode"])
+    allowed_actions: list[str] = Field(
+        default_factory=lambda: ["vmotion", "drs_rebalance", "snapshot_cleanup"]
+    )
+    forbidden_actions: list[str] = Field(
+        default_factory=lambda: ["vm_power_off", "host_maintenance_mode"]
+    )
 
 
 class AgentConfig(BaseModel):
@@ -125,7 +134,9 @@ class KnowledgeBaseConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="VMWARE_AI_", env_nested_delimiter="__", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="VMWARE_AI_", env_nested_delimiter="__", extra="ignore"
+    )
 
     vrops: VROpsConfig = Field(default_factory=VROpsConfig)
     vrli: VRLIConfig = Field(default_factory=VRLIConfig)

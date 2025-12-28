@@ -2,33 +2,34 @@
 Pytest configuration and fixtures for VMware AI Ops Agent tests.
 """
 
-import pytest
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from vmware_ai_ops_agent.config import (
-    Settings,
-    VROpsConfig,
-    VRLIConfig,
-    LLMConfig,
-    VCenterConfig,
-    AgentConfig,
-    VectorDBConfig,
-    NotificationsConfig,
-    MetricsConfig,
-    LoggingConfig,
-    KnowledgeBaseConfig,
-)
+import pytest
+
+from vmware_ai_ops_agent.analysis.models import Urgency
 from vmware_ai_ops_agent.collectors.models import (
-    ResourceKind,
-    ResourceHealth,
-    ResourceIdentifier,
     Alert,
-    Severity,
     InfrastructureState,
     Metric,
+    ResourceHealth,
+    ResourceIdentifier,
+    ResourceKind,
+    Severity,
 )
-from vmware_ai_ops_agent.analysis.models import Urgency
-from datetime import datetime
+from vmware_ai_ops_agent.config import (
+    AgentConfig,
+    KnowledgeBaseConfig,
+    LLMConfig,
+    LoggingConfig,
+    MetricsConfig,
+    NotificationsConfig,
+    Settings,
+    VCenterConfig,
+    VectorDBConfig,
+    VRLIConfig,
+    VROpsConfig,
+)
 
 
 @pytest.fixture
@@ -38,13 +39,20 @@ def test_settings() -> Settings:
         vrops=VROpsConfig(host="test-vrops.local", username="test", password="test"),
         vrli=VRLIConfig(host="test-vrli.local", username="test", password="test"),
         llm=LLMConfig(endpoint="http://localhost:8000/v1", api_key="test-key"),
-        vcenter=VCenterConfig(host="test-vcenter.local", username="test", password="test", dry_run=True),
+        vcenter=VCenterConfig(
+            host="test-vcenter.local",
+            username="test",
+            password="test",
+            dry_run=True,
+        ),
         vector_db=VectorDBConfig(persist_directory="/tmp/test-chromadb"),
         agent=AgentConfig(cycle_interval=60),
         notifications=NotificationsConfig(),
         metrics=MetricsConfig(enabled=False),
         logging=LoggingConfig(level="DEBUG"),
-        knowledge_base=KnowledgeBaseConfig(runbooks_dir="/tmp/runbooks", kb_cache_dir="/tmp/kb_cache"),
+        knowledge_base=KnowledgeBaseConfig(
+            runbooks_dir="/tmp/runbooks", kb_cache_dir="/tmp/kb_cache"
+        ),
     )
 
 
@@ -60,8 +68,18 @@ def sample_resource() -> ResourceHealth:
         health_state="GREEN",
         health_score=75.0,
         metrics={
-            "cpu|usage_average": Metric(resource_id="vm-123", resource_name="test-vm-01", stat_key="cpu|usage_average", values=[45.0]),
-            "mem|usage_average": Metric(resource_id="vm-123", resource_name="test-vm-01", stat_key="mem|usage_average", values=[60.0]),
+            "cpu|usage_average": Metric(
+                resource_id="vm-123",
+                resource_name="test-vm-01",
+                stat_key="cpu|usage_average",
+                values=[45.0],
+            ),
+            "mem|usage_average": Metric(
+                resource_id="vm-123",
+                resource_name="test-vm-01",
+                stat_key="mem|usage_average",
+                values=[60.0],
+            ),
         },
     )
 
@@ -82,7 +100,9 @@ def sample_alert(sample_resource) -> Alert:
 
 
 @pytest.fixture
-def sample_infrastructure_state(sample_resource: ResourceHealth, sample_alert: Alert) -> InfrastructureState:
+def sample_infrastructure_state(
+    sample_resource: ResourceHealth, sample_alert: Alert
+) -> InfrastructureState:
     """Create a sample infrastructure state."""
     state = InfrastructureState()
     state.resources = [sample_resource]
@@ -113,7 +133,9 @@ def mock_vcenter_client():
     client.config = MagicMock()
     client.config.dry_run = True
     client.vmotion_vm = AsyncMock(return_value={"dry_run": True, "action": "vmotion"})
-    client.storage_vmotion_vm = AsyncMock(return_value={"dry_run": True, "action": "storage_vmotion"})
+    client.storage_vmotion_vm = AsyncMock(
+        return_value={"dry_run": True, "action": "storage_vmotion"}
+    )
     client.find_best_target_host = AsyncMock(return_value="host-01")
     client.find_best_target_datastore = AsyncMock(return_value="datastore-01")
     return client

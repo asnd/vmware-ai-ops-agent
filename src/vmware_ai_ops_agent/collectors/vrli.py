@@ -10,7 +10,6 @@ from typing import Any
 
 import httpx
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import VRLIConfig
 from .models import Anomaly, LogEntry, LogQueryResult, Severity
@@ -77,7 +76,10 @@ class VRLICollector:
             raise
 
     async def _ensure_authenticated(self) -> None:
-        if not self._session_id or (self._session_expires and datetime.utcnow() >= self._session_expires):
+        is_expired = (
+            self._session_expires and datetime.utcnow() >= self._session_expires
+        )
+        if not self._session_id or is_expired:
             await self._authenticate()
 
     def _get_headers(self) -> dict[str, str]:
@@ -86,7 +88,6 @@ class VRLICollector:
             "Content-Type": "application/json",
         }
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
     async def _request(
         self,
         method: str,
@@ -96,7 +97,10 @@ class VRLICollector:
     ) -> dict[str, Any]:
         await self._ensure_authenticated()
         url = f"{self.base_url}/{endpoint}"
-        response = await self._client.request(method, url, params=params, json=json_data, headers=self._get_headers())
+        headers = self._get_headers()
+        response = await self._client.request(
+            method, url, params=params, json=json_data, headers=headers
+        )
         response.raise_for_status()
         return response.json()
 
@@ -161,7 +165,9 @@ class VRLICollector:
             entries=entries,
         )
 
-    async def query_error_logs(self, time_range: str = "LAST_1_HOUR", limit: int = 1000) -> LogQueryResult:
+    async def query_error_logs(
+        self, time_range: str = "LAST_1_HOUR", limit: int = 1000
+    ) -> LogQueryResult:
         query = "error OR warning OR critical OR emergency OR alert"
         return await self.query_logs(query, time_range, limit)
 
@@ -182,7 +188,10 @@ class VRLICollector:
                             source="vrli",
                             resource=None,
                             anomaly_type="log_pattern",
-                            description=f"Critical pattern '{pattern_name}' detected: {entry.text[:200]}",
+                            description=(
+                                f"Critical pattern '{pattern_name}' detected: "
+                                f"{entry.text[:200]}"
+                            ),
                             severity=severity,
                             confidence=0.9,
                             detected_at=entry.timestamp,
@@ -212,11 +221,16 @@ class VRLICollector:
         logger.info("Log anomaly detection complete", anomalies=len(anomalies))
         return anomalies
 
-    async def collect_all(self, time_range: str = "LAST_1_HOUR") -> tuple[list[LogEntry], list[Anomaly]]:
+    async def collect_all(
+        self, time_range: str = "LAST_1_HOUR"
+    ) -> tuple[list[LogEntry], list[Anomaly]]:
         error_result, anomalies = await asyncio.gather(
-            self.query_error_logs(time_range),
-            self.detect_anomalies(time_range),
+            self.query_error_logs(time_range), self.detect_anomalies(time_range)
         )
 
-        logger.info("vRLI collection complete", logs=len(error_result.entries), anomalies=len(anomalies))
+        logger.info(
+            "vRLI collection complete",
+            logs=len(error_result.entries),
+            anomalies=len(anomalies),
+        )
         return error_result.entries, anomalies

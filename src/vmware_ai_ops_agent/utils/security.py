@@ -17,7 +17,7 @@ EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 def scrub_sensitive_data(text: str) -> str:
     """
     Redact sensitive information from text strings.
-    
+
     Removes:
     - IPv4 addresses
     - Email addresses
@@ -28,16 +28,16 @@ def scrub_sensitive_data(text: str) -> str:
 
     # Redact IPs
     text = re.sub(IPV4_PATTERN, '[REDACTED_IP]', text)
-    
+
     # Redact Emails
     text = re.sub(EMAIL_PATTERN, '[REDACTED_EMAIL]', text)
-    
+
     # Redact Secrets (matches "key: value" or "key=value")
     # We replace with just the key name and [REDACTED]
     def redact_secret(match):
         key = match.group(1)
         return f"{key}: [REDACTED]"
-        
+
     text = re.sub(SECRET_PATTERN, redact_secret, text)
-    
+
     return text

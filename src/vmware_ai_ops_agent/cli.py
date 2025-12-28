@@ -3,9 +3,9 @@ Command-line interface for VMware AI Ops Agent.
 """
 
 import asyncio
-import sys
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Annotated
 
 import structlog
 import typer
@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .agent import VMwareAIOpsAgent
-from .config import Settings, load_settings
+from .config import load_settings
 
 app = typer.Typer(
     name="vmware-ai-agent",
@@ -34,7 +34,9 @@ def setup_logging(level: str = "INFO") -> None:
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            structlog.dev.ConsoleRenderer() if level == "DEBUG" else structlog.processors.JSONRenderer(),
+            structlog.dev.ConsoleRenderer()
+            if level == "DEBUG"
+            else structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
@@ -45,10 +47,16 @@ def setup_logging(level: str = "INFO") -> None:
 
 @app.command()
 def run(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Configuration file path"),
-    cycle_interval: Optional[int] = typer.Option(None, "--interval", "-i", help="Override cycle interval"),
-    log_level: str = typer.Option("INFO", "--log-level", "-l", help="Log level"),
-    metrics_port: Optional[int] = typer.Option(None, "--metrics-port", help="Metrics server port"),
+    config: Annotated[
+        Path | None, typer.Option("--config", "-c", help="Configuration file path")
+    ] = None,
+    cycle_interval: Annotated[
+        int | None, typer.Option("--interval", "-i", help="Override cycle interval")
+    ] = None,
+    log_level: Annotated[str, typer.Option("--log-level", "-l", help="Log level")] = "INFO",
+    metrics_port: Annotated[
+        int | None, typer.Option("--metrics-port", help="Metrics server port")
+    ] = None,
 ) -> None:
     """Run the VMware AI Ops Agent continuously."""
     setup_logging(log_level)
@@ -65,7 +73,8 @@ def run(
         console.print("[bold green]Starting VMware AI Ops Agent[/bold green]")
         console.print(f"  Cycle interval: {settings.agent.cycle_interval}s")
         console.print(f"  Metrics port: {settings.metrics.port}")
-        console.print(f"  Auto-remediation: {'enabled' if settings.agent.auto_remediate.enabled else 'disabled'}")
+        auto_rem = "enabled" if settings.agent.auto_remediate.enabled else "disabled"
+        console.print(f"  Auto-remediation: {auto_rem}")
 
         agent = VMwareAIOpsAgent(settings)
 
@@ -83,18 +92,24 @@ def run(
 
     except FileNotFoundError as e:
         console.print(f"[red]Configuration error:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     except Exception as e:
         logger.error("Agent failed", error=str(e))
         console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
 def analyze(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Configuration file path"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file for results"),
-    format: str = typer.Option("text", "--format", "-f", help="Output format (text, json)"),
+    config: Annotated[
+        Path | None, typer.Option("--config", "-c", help="Configuration file path")
+    ] = None,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Output file for results")
+    ] = None,
+    out_format: Annotated[
+        str, typer.Option("--format", "-f", help="Output format (text, json)")
+    ] = "text",
 ) -> None:
     """Run a single analysis cycle and exit."""
     setup_logging("INFO")
@@ -112,13 +127,12 @@ def analyze(
         result = asyncio.run(run_analysis())
 
         if result:
-            if format == "json":
-                import json
+            if out_format == "json":
                 output_data = {
                     "summary": result.summary,
                     "urgency": result.urgency.value,
-                    "findings": [f.model_dump() for f in result.findings],
-                    "predictions": [p.model_dump() for p in result.predictions],
+                    "findings": [f.model_dump() for f in getattr(result, "findings", [])],
+                    "predictions": [p.model_dump() for p in result.predicted_failures],
                 }
                 if output:
                     output.write_text(json.dumps(output_data, indent=2, default=str))
@@ -130,33 +144,45 @@ def analyze(
                 table.add_column("Value", style="white")
 
                 table.add_row("Urgency", result.urgency.value)
-                table.add_row("Summary", result.summary[:100] + "..." if len(result.summary) > 100 else result.summary)
-                table.add_row("Findings", str(len(result.findings)))
-                table.add_row("Predictions", str(len(result.predictions)))
-                table.add_row("Has Remediation Plan", "Yes" if result.remediation_plan else "No")
+                summary = result.summary
+                if len(summary) > 100:
+                    summary = summary[:100] + "..."
+                table.add_row("Summary", summary)
+                findings = getattr(result, "findings", [])
+                table.add_row("Findings", str(len(findings)))
+                table.add_row(
+                    "Predictions", str(len(result.predicted_failures))
+                )
+                table.add_row(
+                    "Has Remediation Plan",
+                    "Yes" if result.remediation_plan else "No",
+                )
 
                 console.print(table)
 
-                if result.findings:
+                if findings:
                     console.print("\n[bold]Findings:[/bold]")
-                    for i, finding in enumerate(result.findings, 1):
+                    for i, finding in enumerate(findings, 1):
                         console.print(f"  {i}. [{finding.severity.value}] {finding.title}")
 
-                if result.predictions:
+                if result.predicted_failures:
                     console.print("\n[bold]Predictions:[/bold]")
-                    for pred in result.predictions:
-                        console.print(f"  - {pred.description} (probability: {pred.probability:.0%})")
+                    for pred in result.predicted_failures:
+                        desc = getattr(pred, "description", pred.failure_type)
+                        console.print(f"  - {desc} (probability: {pred.probability:.0%})")
         else:
             console.print("[yellow]No issues detected or analysis failed[/yellow]")
 
     except Exception as e:
         console.print(f"[red]Analysis failed:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
 def status(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Configuration file path"),
+    config: Annotated[
+        Path | None, typer.Option("--config", "-c", help="Configuration file path")
+    ] = None,
 ) -> None:
     """Show agent status and statistics."""
     try:
@@ -179,12 +205,14 @@ def status(
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
 def validate(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Configuration file path"),
+    config: Annotated[
+        Path | None, typer.Option("--config", "-c", help="Configuration file path")
+    ] = None,
 ) -> None:
     """Validate configuration and connectivity."""
     setup_logging("WARNING")
@@ -212,24 +240,32 @@ def validate(
         console.print("\n[bold]Auto-remediation settings:[/bold]")
         console.print(f"  Enabled: {settings.agent.auto_remediate.enabled}")
         console.print(f"  Require approval: {settings.agent.auto_remediate.require_approval}")
-        console.print(f"  Max actions/hour: {settings.agent.auto_remediate.max_actions_per_hour}")
+        console.print(
+            f"  Max actions/hour: {settings.agent.auto_remediate.max_actions_per_hour}"
+        )
         console.print(f"  Allowed: {', '.join(settings.agent.auto_remediate.allowed_actions)}")
-        console.print(f"  Forbidden: {', '.join(settings.agent.auto_remediate.forbidden_actions)}")
+        console.print(
+            f"  Forbidden: {', '.join(settings.agent.auto_remediate.forbidden_actions)}"
+        )
 
         console.print("\n[bold green]Configuration is valid![/bold green]")
 
     except FileNotFoundError as e:
         console.print(f"[red]Configuration file not found:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     except Exception as e:
         console.print(f"[red]Validation failed:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
 def init(
-    output: Path = typer.Option(Path("./config/settings.yaml"), "--output", "-o", help="Output path"),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing file"),
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Output path")
+    ] = Path("./config/settings.yaml"),
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Overwrite existing file")
+    ] = False,
 ) -> None:
     """Generate a sample configuration file."""
     if output.exists() and not force:

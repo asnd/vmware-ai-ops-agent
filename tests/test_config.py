@@ -3,17 +3,15 @@ Tests for configuration management.
 """
 
 import os
-import pytest
 import tempfile
-from pathlib import Path
+
+import pytest
 
 from vmware_ai_ops_agent.config import (
+    AutoRemediateConfig,
+    LLMConfig,
     Settings,
     VROpsConfig,
-    VRLIConfig,
-    LLMConfig,
-    AgentConfig,
-    AutoRemediateConfig,
     load_settings,
 )
 

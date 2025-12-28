@@ -2,10 +2,11 @@
 Action executor for remediation plans.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import structlog
 
@@ -107,23 +108,44 @@ class ActionExecutor:
         if dry_run is None and self.vcenter:
             dry_run = self.vcenter.config.dry_run
 
-        result = ExecutionResult(plan=plan, status=ExecutionStatus.RUNNING, dry_run=dry_run or False)
+        result = ExecutionResult(
+            plan=plan, status=ExecutionStatus.RUNNING, dry_run=dry_run or False
+        )
 
-        logger.info("Starting plan execution", plan_id=plan.id, steps=len(plan.steps), dry_run=dry_run)
+        logger.info(
+            "Starting plan execution",
+            plan_id=plan.id,
+            steps=len(plan.steps),
+            dry_run=dry_run,
+        )
 
         try:
             for step in plan.steps:
                 if not self._check_rate_limit():
-                    result.action_results.append(ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Rate limit"))
+                    result.action_results.append(
+                        ActionResult(
+                            step=step, status=ExecutionStatus.SKIPPED, error="Rate limit"
+                        )
+                    )
                     continue
 
                 if not self._is_action_allowed(step.action_type):
-                    result.action_results.append(ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Not allowed"))
+                    result.action_results.append(
+                        ActionResult(
+                            step=step, status=ExecutionStatus.SKIPPED, error="Not allowed"
+                        )
+                    )
                     continue
 
                 if step.requires_approval and self.config.auto_remediate.require_approval:
                     if not approval_callback or not approval_callback(step):
-                        result.action_results.append(ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Approval required"))
+                        result.action_results.append(
+                            ActionResult(
+                                step=step,
+                                status=ExecutionStatus.SKIPPED,
+                                error="Approval required",
+                            )
+                        )
                         continue
 
                 action_result = await self._execute_step(step, dry_run or False)
@@ -132,7 +154,11 @@ class ActionExecutor:
                 if action_result.success:
                     self._action_count_hour += 1
 
-                if not action_result.success and step.action_type not in (ActionType.NOTIFY, ActionType.INVESTIGATE):
+                is_critical = step.action_type not in (
+                    ActionType.NOTIFY,
+                    ActionType.INVESTIGATE,
+                )
+                if not action_result.success and is_critical:
                     result.status = ExecutionStatus.FAILED
                     break
             else:
@@ -147,7 +173,9 @@ class ActionExecutor:
         return result
 
     async def _execute_step(self, step: RemediationStep, dry_run: bool) -> ActionResult:
-        result = ActionResult(step=step, status=ExecutionStatus.RUNNING, started_at=datetime.utcnow())
+        result = ActionResult(
+            step=step, status=ExecutionStatus.RUNNING, started_at=datetime.utcnow()
+        )
 
         try:
             handler = self._handlers.get(step.action_type, self._execute_investigate)
@@ -176,7 +204,9 @@ class ActionExecutor:
 
         return await self.vcenter.vmotion_vm(vm_id, target_host)
 
-    async def _execute_storage_vmotion(self, step: RemediationStep, dry_run: bool) -> dict[str, Any]:
+    async def _execute_storage_vmotion(
+        self, step: RemediationStep, dry_run: bool
+    ) -> dict[str, Any]:
         if not self.vcenter:
             raise RuntimeError("vCenter client not configured")
 

@@ -5,7 +5,6 @@ LLM-powered analysis engine for VMware infrastructure.
 import json
 import time
 import uuid
-from datetime import datetime
 from typing import Any
 
 import structlog
@@ -18,7 +17,6 @@ from ..utils.security import scrub_sensitive_data
 from .models import (
     ActionType,
     AnalysisResult,
-    CorrelatedEvent,
     PredictedFailure,
     RemediationPlan,
     RemediationStep,
@@ -28,7 +26,8 @@ from .models import (
 
 logger = structlog.get_logger(__name__)
 
-SYSTEM_PROMPT = """You are an expert VMware infrastructure analyst. Analyze vROps metrics and vRLI logs to:
+SYSTEM_PROMPT = """You are an expert VMware infrastructure analyst.
+Analyze vROps metrics and vRLI logs to:
 1. Identify correlations and patterns
 2. Detect potential failures
 3. Provide root cause analysis
@@ -81,7 +80,9 @@ class LLMAnalysisEngine:
 
     def _format_alerts(self, alerts: list[Alert], max_alerts: int = 20) -> str:
         severity_order = {"CRITICAL": 0, "IMMEDIATE": 1, "WARNING": 2, "INFO": 3}
-        sorted_alerts = sorted(alerts, key=lambda a: severity_order.get(a.severity.value, 4))[:max_alerts]
+        sorted_alerts = sorted(
+            alerts, key=lambda a: severity_order.get(a.severity.value, 4)
+        )[:max_alerts]
         lines = ["## Active Alerts\n"]
         for alert in sorted_alerts:
             lines.append(f"### [{alert.severity.value}] {alert.name}")
@@ -91,7 +92,7 @@ class LLMAnalysisEngine:
         return "\n".join(lines)
 
     def _format_logs(self, logs: list[LogEntry], max_logs: int = 50) -> str:
-        sorted_logs = sorted(logs, key=lambda l: l.timestamp, reverse=True)[:max_logs]
+        sorted_logs = sorted(logs, key=lambda log: log.timestamp, reverse=True)[:max_logs]
         lines = ["## Recent Logs\n"]
         for log in sorted_logs:
             timestamp = log.timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -116,10 +117,21 @@ Provide analysis in JSON format:
 {{
     "summary": "Brief assessment",
     "urgency": "critical|high|medium|low",
-    "predictions": [{{"resource_name": "...", "failure_type": "...", "probability": 0.0-1.0, "indicators": ["..."]}}],
-    "root_cause": {{"primary_cause": "...", "confidence": 0.0-1.0, "contributing_factors": ["..."]}},
+    "predictions": [
+        {{
+            "resource_name": "...",
+            "failure_type": "...",
+            "probability": 0.0-1.0,
+            "indicators": ["..."]
+        }}
+    ],
+    "root_cause": {{
+        "primary_cause": "...", "confidence": 0.0-1.0, "contributing_factors": ["..."]
+    }},
     "insights": ["..."],
-    "recommended_actions": [{{"action": "...", "urgency": "...", "target": "...", "reason": "..."}}]
+    "recommended_actions": [
+        {{"action": "...", "urgency": "...", "target": "...", "reason": "..."}}
+    ]
 }}"""
 
         response, tokens = await self._chat_completion(SYSTEM_PROMPT, user_prompt)
@@ -169,16 +181,25 @@ Provide analysis in JSON format:
             )
 
         if result.requires_immediate_action() or result.has_predictions():
-            result.remediation_plan = await self._generate_remediation_plan(analysis_data, result.urgency)
+            result.remediation_plan = await self._generate_remediation_plan(
+                analysis_data, result.urgency
+            )
 
-        logger.info("Infrastructure analysis complete", urgency=result.urgency.value, duration=result.analysis_duration_seconds)
+        logger.info(
+            "Infrastructure analysis complete",
+            urgency=result.urgency.value,
+            duration=result.analysis_duration_seconds,
+        )
         return result
 
-    async def _generate_remediation_plan(self, analysis_data: dict[str, Any], urgency: Urgency) -> RemediationPlan:
+    async def _generate_remediation_plan(
+        self, analysis_data: dict[str, Any], urgency: Urgency
+    ) -> RemediationPlan:
         steps = []
         for i, action in enumerate(analysis_data.get("recommended_actions", [])[:5], 1):
             try:
-                action_type = ActionType(action.get("action", "investigate").lower().replace(" ", "_"))
+                action_name = action.get("action", "investigate").lower()
+                action_type = ActionType(action_name.replace(" ", "_"))
             except ValueError:
                 action_type = ActionType.INVESTIGATE
 
