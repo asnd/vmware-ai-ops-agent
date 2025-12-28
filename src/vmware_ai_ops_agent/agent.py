@@ -3,15 +3,16 @@ Main VMware AI Ops Agent orchestrator.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
-from .actions.executor import ActionExecutor, ExecutionResult
+from .actions.executor import ActionExecutor
 from .actions.notifications import NotificationService
 from .actions.vcenter import VCenterClient
 from .analysis.knowledge_base import KnowledgeBase
@@ -25,10 +26,20 @@ from .correlation.engine import CorrelatedIssue, CorrelationEngine, CorrelationR
 
 logger = structlog.get_logger(__name__)
 
-ANALYSIS_CYCLES = Counter("vmware_ai_agent_analysis_cycles_total", "Total analysis cycles", ["status"])
-ISSUES_DETECTED = Counter("vmware_ai_agent_issues_detected_total", "Issues detected", ["severity"])
-CYCLE_DURATION = Histogram("vmware_ai_agent_cycle_duration_seconds", "Cycle duration", buckets=[5, 10, 30, 60, 120, 300])
-RESOURCE_HEALTH = Gauge("vmware_ai_agent_resource_health", "Resource health", ["resource_name", "resource_kind"])
+ANALYSIS_CYCLES = Counter(
+    "vmware_ai_agent_analysis_cycles_total", "Total analysis cycles", ["status"]
+)
+ISSUES_DETECTED = Counter(
+    "vmware_ai_agent_issues_detected_total", "Issues detected", ["severity"]
+)
+CYCLE_DURATION = Histogram(
+    "vmware_ai_agent_cycle_duration_seconds",
+    "Cycle duration",
+    buckets=[5, 10, 30, 60, 120, 300],
+)
+RESOURCE_HEALTH = Gauge(
+    "vmware_ai_agent_resource_health", "Resource health", ["resource_name", "resource_kind"]
+)
 
 
 @dataclass
@@ -164,10 +175,16 @@ class VMwareAIOpsAgent:
         state.recent_logs = logs
         state.anomalies.extend(log_anomalies)
 
-        logger.info("Infrastructure state collected", resources=len(state.resources), logs=len(state.recent_logs))
+        logger.info(
+            "Infrastructure state collected",
+            resources=len(state.resources),
+            logs=len(state.recent_logs),
+        )
         return state
 
-    async def _handle_analysis_results(self, analysis: AnalysisResult, correlation: CorrelationResult) -> None:
+    async def _handle_analysis_results(
+        self, analysis: AnalysisResult, correlation: CorrelationResult
+    ) -> None:
         if self._on_analysis_complete:
             self._on_analysis_complete(analysis)
 
@@ -191,9 +208,16 @@ class VMwareAIOpsAgent:
         try:
             async with VCenterClient(self.settings.vcenter) as vcenter:
                 async with NotificationService(self.settings.notifications) as notifications:
-                    executor = ActionExecutor(self.settings.agent, vcenter=vcenter, notifications=notifications)
-                    result = await executor.execute_plan(analysis.remediation_plan, approval_callback=self._approval_callback)
-                    self.state.actions_executed += sum(1 for r in result.action_results if r.success)
+                    executor = ActionExecutor(
+                        self.settings.agent, vcenter=vcenter, notifications=notifications
+                    )
+                    result = await executor.execute_plan(
+                        analysis.remediation_plan,
+                        approval_callback=self._approval_callback,
+                    )
+                    self.state.actions_executed += sum(
+                        1 for r in result.action_results if r.success
+                    )
         except Exception as e:
             logger.error("Auto-remediation failed", error=str(e))
 
@@ -214,10 +238,18 @@ class VMwareAIOpsAgent:
         return {
             "running": self.state.running,
             "total_cycles": self.state.total_cycles,
-            "last_cycle_at": self.state.last_cycle_at.isoformat() if self.state.last_cycle_at else None,
+            "last_cycle_at": (
+                self.state.last_cycle_at.isoformat()
+                if self.state.last_cycle_at
+                else None
+            ),
             "issues_detected": self.state.issues_detected,
             "actions_executed": self.state.actions_executed,
-            "last_analysis_urgency": self.state.last_analysis.urgency.value if self.state.last_analysis else None,
+            "last_analysis_urgency": (
+                self.state.last_analysis.urgency.value
+                if self.state.last_analysis
+                else None
+            ),
             "knowledge_base": self.knowledge_base.get_statistics(),
         }
 

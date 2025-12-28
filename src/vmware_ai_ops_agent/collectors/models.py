@@ -92,7 +92,8 @@ class ResourceHealth(BaseModel):
 
     def is_warning(self) -> bool:
         """Check if resource is in warning state."""
-        return self.health_state in (HealthState.YELLOW, HealthState.ORANGE) or self.health_score < 50
+        is_unhealthy = self.health_state in (HealthState.YELLOW, HealthState.ORANGE)
+        return is_unhealthy or self.health_score < 50
 
 
 class Symptom(BaseModel):

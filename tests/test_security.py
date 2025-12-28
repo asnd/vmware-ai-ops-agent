@@ -1,6 +1,6 @@
 
-import pytest
 from vmware_ai_ops_agent.utils.security import scrub_sensitive_data
+
 
 def test_scrub_sensitive_data_ips():
     text = "Connection from 192.168.1.1 to 10.0.0.5 failed."

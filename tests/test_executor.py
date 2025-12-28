@@ -2,9 +2,9 @@
 Tests for the action executor.
 """
 
-import pytest
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from vmware_ai_ops_agent.actions.executor import (
     ActionExecutor,
@@ -78,7 +78,9 @@ class TestActionExecutor:
         )
 
     @pytest.mark.asyncio
-    async def test_execute_plan_success(self, executor: ActionExecutor, sample_plan: RemediationPlan):
+    async def test_execute_plan_success(
+        self, executor: ActionExecutor, sample_plan: RemediationPlan
+    ):
         """Plan execution should complete successfully."""
         result = await executor.execute_plan(sample_plan, dry_run=True)
 
@@ -195,7 +197,9 @@ class TestActionExecutor:
             ],
         )
 
-        result = await executor.execute_plan(plan, dry_run=True, approval_callback=lambda step: True)
+        result = await executor.execute_plan(
+            plan, dry_run=True, approval_callback=lambda step: True
+        )
 
         assert result.action_results[0].status == ExecutionStatus.COMPLETED
 

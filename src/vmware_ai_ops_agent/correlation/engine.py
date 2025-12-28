@@ -9,7 +9,14 @@ from typing import Any
 
 import structlog
 
-from ..collectors.models import Alert, Anomaly, InfrastructureState, LogEntry, ResourceHealth, Severity
+from ..collectors.models import (
+    Alert,
+    Anomaly,
+    InfrastructureState,
+    LogEntry,
+    ResourceHealth,
+    Severity,
+)
 from .patterns import KnownPattern, PatternMatcher
 
 logger = structlog.get_logger(__name__)
@@ -105,7 +112,7 @@ class CorrelationEngine:
             pattern_evidence[pattern.id]["alerts"].extend(alerts)
             pattern_evidence[pattern.id]["pattern"] = pattern
 
-        for pattern_id, evidence in pattern_evidence.items():
+        for _pattern_id, evidence in pattern_evidence.items():
             pattern = evidence.get("pattern")
             if not pattern:
                 continue
@@ -182,7 +189,9 @@ class CorrelationEngine:
                 )
                 issues.append(new_issue)
 
-    def _correlate_unhealthy_resources(self, state: InfrastructureState, result: CorrelationResult) -> None:
+    def _correlate_unhealthy_resources(
+        self, state: InfrastructureState, result: CorrelationResult
+    ) -> None:
         matched_resource_ids = set()
         for issue in result.issues:
             for resource in issue.resources:

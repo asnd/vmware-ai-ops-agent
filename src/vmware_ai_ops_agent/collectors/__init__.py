@@ -2,16 +2,16 @@
 Data collectors for VMware infrastructure.
 """
 
-from .vrops import VROpsCollector
-from .vrli import VRLICollector
 from .models import (
-    ResourceHealth,
     Alert,
-    Metric,
-    LogEntry,
-    Recommendation,
     Anomaly,
+    LogEntry,
+    Metric,
+    Recommendation,
+    ResourceHealth,
 )
+from .vrli import VRLICollector
+from .vrops import VROpsCollector
 
 __all__ = [
     "VROpsCollector",

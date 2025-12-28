@@ -15,7 +15,6 @@ from .models import (
     Alert,
     Anomaly,
     HealthState,
-    Metric,
     Recommendation,
     ResourceHealth,
     ResourceIdentifier,
@@ -117,7 +116,9 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=item["identifier"],
                 name=item.get("resourceKey", {}).get("name", "Unknown"),
-                kind=ResourceKind(item.get("resourceKey", {}).get("resourceKindKey", "VirtualMachine")),
+                kind=ResourceKind(
+                    item.get("resourceKey", {}).get("resourceKindKey", "VirtualMachine")
+                ),
                 adapter_kind=item.get("resourceKey", {}).get("adapterKindKey", "VMWARE"),
             )
             resources.append(resource)
@@ -130,7 +131,13 @@ class VROpsCollector:
                 "GET",
                 f"resources/{resource_id}/stats",
                 params={
-                    "statKey": ["badge|health", "badge|workload", "badge|anomalies", "badge|faults", "badge|risk"],
+                    "statKey": [
+                        "badge|health",
+                        "badge|workload",
+                        "badge|anomalies",
+                        "badge|faults",
+                        "badge|risk",
+                    ],
                     "rollUpType": "AVG",
                     "intervalType": "HOURS",
                     "intervalCount": 1,
@@ -326,11 +333,14 @@ class VROpsCollector:
             resources = await self.get_resources(resource_kind=kind)
             semaphore = asyncio.Semaphore(10)
 
-            async def get_health_with_limit(res_id: str):
-                async with semaphore:
+            async def get_health_with_limit(res_id: str, sem: asyncio.Semaphore):
+                async with sem:
                     return await self.get_resource_health(res_id)
 
-            tasks = [get_health_with_limit(r.id) for r in resources]
+            tasks = [
+                get_health_with_limit(res["identifier"], semaphore)
+                for res in resources
+            ]
             health_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for health in health_results:

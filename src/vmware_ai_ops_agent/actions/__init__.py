@@ -3,7 +3,7 @@ Action execution framework for VMware remediation.
 """
 
 from .executor import ActionExecutor
-from .vcenter import VCenterClient
 from .notifications import NotificationService
+from .vcenter import VCenterClient
 
 __all__ = ["ActionExecutor", "VCenterClient", "NotificationService"]

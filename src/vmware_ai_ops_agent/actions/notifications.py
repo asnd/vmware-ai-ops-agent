@@ -5,7 +5,6 @@ Notification service for alerts and updates.
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any
 
 import httpx
 import structlog
@@ -34,7 +33,6 @@ class NotificationService:
 
     async def notify_issue(self, issue: CorrelatedIssue) -> dict[str, bool]:
         results = {}
-        urgency = Urgency.CRITICAL if issue.severity.value == "CRITICAL" else Urgency.HIGH
 
         if self.config.slack.enabled:
             success = await self._send_slack(
@@ -105,5 +103,6 @@ class NotificationService:
         with smtplib.SMTP(self.config.email.smtp_host, self.config.email.smtp_port) as server:
             server.starttls()
             if self.config.email.smtp_user:
-                server.login(self.config.email.smtp_user, self.config.email.smtp_password.get_secret_value())
+                password = self.config.email.smtp_password.get_secret_value()
+                server.login(self.config.email.smtp_user, password)
             server.send_message(msg)

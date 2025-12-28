@@ -86,10 +86,21 @@ class VCenterClient:
 
     async def storage_vmotion_vm(self, vm_id: str, target_datastore: str) -> dict[str, Any]:
         if self.config.dry_run:
-            logger.info("DRY RUN: Would Storage vMotion", vm_id=vm_id, target_datastore=target_datastore)
-            return {"dry_run": True, "action": "storage_vmotion", "vm": vm_id, "target": target_datastore}
+            logger.info(
+                "DRY RUN: Would Storage vMotion",
+                vm_id=vm_id,
+                target_datastore=target_datastore,
+            )
+            return {
+                "dry_run": True,
+                "action": "storage_vmotion",
+                "vm": vm_id,
+                "target": target_datastore,
+            }
 
-        logger.info("Initiating Storage vMotion", vm_id=vm_id, target_datastore=target_datastore)
+        logger.info(
+            "Initiating Storage vMotion", vm_id=vm_id, target_datastore=target_datastore
+        )
         payload = {"placement": {"datastore": target_datastore}}
         result = await self._request("POST", f"vcenter/vm/{vm_id}/relocate", json=payload)
         return result or {}
@@ -102,7 +113,9 @@ class VCenterClient:
         logger.info("Triggering DRS recommendation", cluster_id=cluster_id)
         return {"action": "drs_trigger", "cluster": cluster_id, "status": "requested"}
 
-    async def find_best_target_host(self, vm_id: str, exclude_hosts: list[str] | None = None) -> str | None:
+    async def find_best_target_host(
+        self, vm_id: str, exclude_hosts: list[str] | None = None
+    ) -> str | None:
         exclude_hosts = exclude_hosts or []
         hosts = await self.get_hosts()
         available = [
