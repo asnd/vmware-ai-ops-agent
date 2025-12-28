@@ -45,7 +45,7 @@ class NotificationService:
         if self.config.email.enabled:
             success = await self._send_email(
                 f"[{issue.severity.value}] {issue.description[:50]}",
-                f"Issue: {issue.description}\n\nRecommendations: {issue.recommended_actions}"
+                f"Issue: {issue.description}\n\nRecommendations: {issue.recommended_actions}",
             )
             results["email"] = success
 
@@ -91,6 +91,7 @@ class NotificationService:
             msg.attach(MIMEText(body, "plain"))
 
             import asyncio
+
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._send_smtp, msg)
             logger.info("Email notification sent")

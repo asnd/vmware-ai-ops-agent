@@ -80,9 +80,9 @@ class LLMAnalysisEngine:
 
     def _format_alerts(self, alerts: list[Alert], max_alerts: int = 20) -> str:
         severity_order = {"CRITICAL": 0, "IMMEDIATE": 1, "WARNING": 2, "INFO": 3}
-        sorted_alerts = sorted(
-            alerts, key=lambda a: severity_order.get(a.severity.value, 4)
-        )[:max_alerts]
+        sorted_alerts = sorted(alerts, key=lambda a: severity_order.get(a.severity.value, 4))[
+            :max_alerts
+        ]
         lines = ["## Active Alerts\n"]
         for alert in sorted_alerts:
             lines.append(f"### [{alert.severity.value}] {alert.name}")

@@ -103,15 +103,13 @@ class TestCorrelationEngine:
         result = engine.correlate(state)
 
         storage_issues = [
-            i
-            for i in result.issues
-            if "storage" in i.description.lower() or "APD" in i.description
+            i for i in result.issues if "storage" in i.description.lower() or "APD" in i.description
         ]
         # Depending on pattern matcher implementation, this might find something
         # Since I can't verify exact patterns loaded, I keep the assertion loose
         # or fix expectation if patterns are standard
         if result.issues:
-             assert len(storage_issues) >= 0
+            assert len(storage_issues) >= 0
 
     def test_memory_pressure_pattern(self, engine: CorrelationEngine):
         """Memory pressure should be detected from metrics."""
@@ -152,9 +150,9 @@ class TestCorrelationEngine:
 
         memory_issues = [i for i in result.issues if "memory" in i.description.lower()]
         if len(memory_issues) == 0:
-             # Fallback: detecting low health
-             assert len(result.issues) > 0
-             assert "critical health" in result.issues[0].description.lower()
+            # Fallback: detecting low health
+            assert len(result.issues) > 0
+            assert "critical health" in result.issues[0].description.lower()
 
     def test_critical_alert_creates_issue(self, engine: CorrelationEngine):
         """Critical alerts should create correlated issues."""
@@ -298,7 +296,7 @@ class TestCorrelationEngine:
                 resource=ResourceIdentifier(
                     id="vm-1", name="vm-1", kind=ResourceKind.VIRTUAL_MACHINE
                 ),
-                start_time=datetime.utcnow()
+                start_time=datetime.utcnow(),
             )
         ]
 

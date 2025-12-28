@@ -123,17 +123,13 @@ class ActionExecutor:
             for step in plan.steps:
                 if not self._check_rate_limit():
                     result.action_results.append(
-                        ActionResult(
-                            step=step, status=ExecutionStatus.SKIPPED, error="Rate limit"
-                        )
+                        ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Rate limit")
                     )
                     continue
 
                 if not self._is_action_allowed(step.action_type):
                     result.action_results.append(
-                        ActionResult(
-                            step=step, status=ExecutionStatus.SKIPPED, error="Not allowed"
-                        )
+                        ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Not allowed")
                     )
                     continue
 
