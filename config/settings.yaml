@@ -1,0 +1,21 @@
+# VMware AI Ops Agent Configuration
+# Full configuration template in conversation history
+
+vrops:
+  host: "vrops.example.com"
+  username: "${VROPS_USERNAME}"
+  password: "${VROPS_PASSWORD}"
+
+vrli:
+  host: "vrli.example.com"
+  username: "${VRLI_USERNAME}"
+  password: "${VRLI_PASSWORD}"
+
+llm:
+  endpoint: "http://localhost:8000/v1"
+  model: "mistral-7b-instruct"
+
+agent:
+  cycle_interval: 300
+  auto_remediate:
+    enabled: false
