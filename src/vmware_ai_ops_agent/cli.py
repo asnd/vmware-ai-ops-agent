@@ -34,9 +34,11 @@ def setup_logging(level: str = "INFO") -> None:
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            structlog.dev.ConsoleRenderer()
-            if level == "DEBUG"
-            else structlog.processors.JSONRenderer(),
+            (
+                structlog.dev.ConsoleRenderer()
+                if level == "DEBUG"
+                else structlog.processors.JSONRenderer()
+            ),
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
@@ -150,9 +152,7 @@ def analyze(
                 table.add_row("Summary", summary)
                 findings = getattr(result, "findings", [])
                 table.add_row("Findings", str(len(findings)))
-                table.add_row(
-                    "Predictions", str(len(result.predicted_failures))
-                )
+                table.add_row("Predictions", str(len(result.predicted_failures)))
                 table.add_row(
                     "Has Remediation Plan",
                     "Yes" if result.remediation_plan else "No",
@@ -240,13 +240,9 @@ def validate(
         console.print("\n[bold]Auto-remediation settings:[/bold]")
         console.print(f"  Enabled: {settings.agent.auto_remediate.enabled}")
         console.print(f"  Require approval: {settings.agent.auto_remediate.require_approval}")
-        console.print(
-            f"  Max actions/hour: {settings.agent.auto_remediate.max_actions_per_hour}"
-        )
+        console.print(f"  Max actions/hour: {settings.agent.auto_remediate.max_actions_per_hour}")
         console.print(f"  Allowed: {', '.join(settings.agent.auto_remediate.allowed_actions)}")
-        console.print(
-            f"  Forbidden: {', '.join(settings.agent.auto_remediate.forbidden_actions)}"
-        )
+        console.print(f"  Forbidden: {', '.join(settings.agent.auto_remediate.forbidden_actions)}")
 
         console.print("\n[bold green]Configuration is valid![/bold green]")
 
@@ -260,12 +256,10 @@ def validate(
 
 @app.command()
 def init(
-    output: Annotated[
-        Path, typer.Option("--output", "-o", help="Output path")
-    ] = Path("./config/settings.yaml"),
-    force: Annotated[
-        bool, typer.Option("--force", "-f", help="Overwrite existing file")
-    ] = False,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output path")] = Path(
+        "./config/settings.yaml"
+    ),
+    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False,
 ) -> None:
     """Generate a sample configuration file."""
     if output.exists() and not force:

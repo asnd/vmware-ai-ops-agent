@@ -20,6 +20,7 @@ class PatternCategory(str, Enum):
 @dataclass
 class KnownPattern:
     """Definition of a known issue pattern."""
+
     id: str
     name: str
     category: PatternCategory

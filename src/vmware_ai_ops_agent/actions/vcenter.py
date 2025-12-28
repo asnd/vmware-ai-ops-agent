@@ -98,9 +98,7 @@ class VCenterClient:
                 "target": target_datastore,
             }
 
-        logger.info(
-            "Initiating Storage vMotion", vm_id=vm_id, target_datastore=target_datastore
-        )
+        logger.info("Initiating Storage vMotion", vm_id=vm_id, target_datastore=target_datastore)
         payload = {"placement": {"datastore": target_datastore}}
         result = await self._request("POST", f"vcenter/vm/{vm_id}/relocate", json=payload)
         return result or {}
@@ -119,17 +117,16 @@ class VCenterClient:
         exclude_hosts = exclude_hosts or []
         hosts = await self.get_hosts()
         available = [
-            h for h in hosts
-            if h.get("connection_state") == "CONNECTED"
-            and h.get("host") not in exclude_hosts
+            h
+            for h in hosts
+            if h.get("connection_state") == "CONNECTED" and h.get("host") not in exclude_hosts
         ]
         return available[0].get("host") if available else None
 
     async def find_best_target_datastore(self, vm_id: str, min_free_gb: int = 100) -> str | None:
         datastores = await self.get_datastores()
         available = [
-            ds for ds in datastores
-            if ds.get("free_space", 0) >= min_free_gb * 1024 * 1024 * 1024
+            ds for ds in datastores if ds.get("free_space", 0) >= min_free_gb * 1024 * 1024 * 1024
         ]
         available.sort(key=lambda ds: ds.get("free_space", 0), reverse=True)
         return available[0].get("datastore") if available else None

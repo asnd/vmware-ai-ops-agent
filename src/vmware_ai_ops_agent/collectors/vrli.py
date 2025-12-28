@@ -76,9 +76,7 @@ class VRLICollector:
             raise
 
     async def _ensure_authenticated(self) -> None:
-        is_expired = (
-            self._session_expires and datetime.utcnow() >= self._session_expires
-        )
+        is_expired = self._session_expires and datetime.utcnow() >= self._session_expires
         if not self._session_id or is_expired:
             await self._authenticate()
 

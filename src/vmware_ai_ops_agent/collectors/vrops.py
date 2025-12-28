@@ -337,10 +337,7 @@ class VROpsCollector:
                 async with sem:
                     return await self.get_resource_health(res_id)
 
-            tasks = [
-                get_health_with_limit(res["identifier"], semaphore)
-                for res in resources
-            ]
+            tasks = [get_health_with_limit(res["identifier"], semaphore) for res in resources]
             health_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for health in health_results:

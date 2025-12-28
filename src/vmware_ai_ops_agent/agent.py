@@ -29,9 +29,7 @@ logger = structlog.get_logger(__name__)
 ANALYSIS_CYCLES = Counter(
     "vmware_ai_agent_analysis_cycles_total", "Total analysis cycles", ["status"]
 )
-ISSUES_DETECTED = Counter(
-    "vmware_ai_agent_issues_detected_total", "Issues detected", ["severity"]
-)
+ISSUES_DETECTED = Counter("vmware_ai_agent_issues_detected_total", "Issues detected", ["severity"])
 CYCLE_DURATION = Histogram(
     "vmware_ai_agent_cycle_duration_seconds",
     "Cycle duration",
@@ -239,16 +237,12 @@ class VMwareAIOpsAgent:
             "running": self.state.running,
             "total_cycles": self.state.total_cycles,
             "last_cycle_at": (
-                self.state.last_cycle_at.isoformat()
-                if self.state.last_cycle_at
-                else None
+                self.state.last_cycle_at.isoformat() if self.state.last_cycle_at else None
             ),
             "issues_detected": self.state.issues_detected,
             "actions_executed": self.state.actions_executed,
             "last_analysis_urgency": (
-                self.state.last_analysis.urgency.value
-                if self.state.last_analysis
-                else None
+                self.state.last_analysis.urgency.value if self.state.last_analysis else None
             ),
             "knowledge_base": self.knowledge_base.get_statistics(),
         }

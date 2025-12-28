@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 try:
     import chromadb
+
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
@@ -23,6 +24,7 @@ logger = structlog.get_logger(__name__)
 
 class Incident(BaseModel):
     """Historical incident record."""
+
     id: str
     timestamp: datetime
     summary: str
@@ -35,6 +37,7 @@ class Incident(BaseModel):
 
 class SimilarityResult(BaseModel):
     """Result from similarity search."""
+
     id: str
     document_type: str
     content: str

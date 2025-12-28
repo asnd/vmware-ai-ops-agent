@@ -25,6 +25,7 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class CorrelatedIssue:
     """An issue correlated across multiple data sources."""
+
     id: str
     pattern: KnownPattern | None
     severity: Severity
@@ -56,6 +57,7 @@ class CorrelatedIssue:
 @dataclass
 class CorrelationResult:
     """Result of correlation analysis."""
+
     timestamp: datetime = field(default_factory=datetime.utcnow)
     issues: list[CorrelatedIssue] = field(default_factory=list)
     patterns_matched: int = 0

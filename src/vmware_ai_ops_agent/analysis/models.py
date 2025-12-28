@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class Urgency(str, Enum):
     """Action urgency levels."""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -19,6 +20,7 @@ class Urgency(str, Enum):
 
 class ActionType(str, Enum):
     """Types of remediation actions."""
+
     VMOTION = "vmotion"
     STORAGE_VMOTION = "storage_vmotion"
     DRS_REBALANCE = "drs_rebalance"
@@ -33,6 +35,7 @@ class ActionType(str, Enum):
 
 class PredictedFailure(BaseModel):
     """Predicted failure from AI analysis."""
+
     resource_id: str
     resource_name: str
     failure_type: str
@@ -45,6 +48,7 @@ class PredictedFailure(BaseModel):
 
 class RemediationStep(BaseModel):
     """Single remediation step."""
+
     order: int
     action_type: ActionType
     description: str
@@ -57,6 +61,7 @@ class RemediationStep(BaseModel):
 
 class RemediationPlan(BaseModel):
     """Complete remediation plan."""
+
     id: str
     title: str
     description: str
@@ -71,6 +76,7 @@ class RemediationPlan(BaseModel):
 
 class RootCauseAnalysis(BaseModel):
     """Root cause analysis result."""
+
     primary_cause: str
     confidence: float
     contributing_factors: list[str] = Field(default_factory=list)
@@ -81,6 +87,7 @@ class RootCauseAnalysis(BaseModel):
 
 class CorrelatedEvent(BaseModel):
     """Event correlated across metrics and logs."""
+
     event_type: str
     source: str
     timestamp: datetime
@@ -90,6 +97,7 @@ class CorrelatedEvent(BaseModel):
 
 class AnalysisResult(BaseModel):
     """Complete analysis result from AI engine."""
+
     id: str
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
     summary: str

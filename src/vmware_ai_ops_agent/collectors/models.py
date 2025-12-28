@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class Severity(str, Enum):
     """Alert severity levels."""
+
     CRITICAL = "CRITICAL"
     IMMEDIATE = "IMMEDIATE"
     WARNING = "WARNING"
@@ -19,6 +20,7 @@ class Severity(str, Enum):
 
 class ResourceKind(str, Enum):
     """VMware resource types."""
+
     VIRTUAL_MACHINE = "VirtualMachine"
     HOST_SYSTEM = "HostSystem"
     CLUSTER = "ClusterComputeResource"
@@ -32,6 +34,7 @@ class ResourceKind(str, Enum):
 
 class HealthState(str, Enum):
     """Resource health states."""
+
     GREEN = "GREEN"
     YELLOW = "YELLOW"
     ORANGE = "ORANGE"
@@ -41,6 +44,7 @@ class HealthState(str, Enum):
 
 class ResourceIdentifier(BaseModel):
     """Resource identifier from vROps."""
+
     id: str
     name: str
     kind: ResourceKind
@@ -50,6 +54,7 @@ class ResourceIdentifier(BaseModel):
 
 class Metric(BaseModel):
     """Time-series metric from vROps."""
+
     resource_id: str
     resource_name: str
     stat_key: str
@@ -75,6 +80,7 @@ class Metric(BaseModel):
 
 class ResourceHealth(BaseModel):
     """Resource health information from vROps."""
+
     resource: ResourceIdentifier
     health_state: HealthState
     health_score: float = 0.0
@@ -98,6 +104,7 @@ class ResourceHealth(BaseModel):
 
 class Symptom(BaseModel):
     """Alert symptom from vROps."""
+
     id: str
     name: str
     severity: Severity
@@ -109,6 +116,7 @@ class Symptom(BaseModel):
 
 class Alert(BaseModel):
     """Alert from vROps."""
+
     id: str
     alert_definition_id: str
     name: str
@@ -130,6 +138,7 @@ class Alert(BaseModel):
 
 class Recommendation(BaseModel):
     """Action recommendation from vROps."""
+
     id: str
     description: str
     action: str
@@ -142,6 +151,7 @@ class Recommendation(BaseModel):
 
 class LogEntry(BaseModel):
     """Log entry from vRLI."""
+
     id: str
     timestamp: datetime
     source: str
@@ -160,6 +170,7 @@ class LogEntry(BaseModel):
 
 class LogQueryResult(BaseModel):
     """Result of a vRLI log query."""
+
     total_count: int
     returned_count: int
     query: str
@@ -169,6 +180,7 @@ class LogQueryResult(BaseModel):
 
 class Anomaly(BaseModel):
     """Anomaly detected in metrics or logs."""
+
     id: str
     source: str
     resource: ResourceIdentifier | None = None
@@ -184,6 +196,7 @@ class Anomaly(BaseModel):
 
 class InfrastructureState(BaseModel):
     """Complete infrastructure state snapshot."""
+
     collected_at: datetime = Field(default_factory=datetime.utcnow)
     resources: list[ResourceHealth] = Field(default_factory=list)
     alerts: list[Alert] = Field(default_factory=list)
