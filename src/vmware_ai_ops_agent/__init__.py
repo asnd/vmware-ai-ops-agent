@@ -2,9 +2,11 @@
 VMware AI Ops Agent
 
 AI-powered proactive maintenance agent for VMware vROps and vRLI.
-
-Full implementation in progress. This is the project skeleton.
 """
+
+from .agent import VMwareAIOpsAgent
+from .config import Settings, load_settings
 
 __version__ = "1.0.0"
 __author__ = "Security Research Team"
+__all__ = ["VMwareAIOpsAgent", "Settings", "load_settings"]

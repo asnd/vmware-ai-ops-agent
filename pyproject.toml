@@ -24,6 +24,7 @@ dependencies = [
     "structlog>=23.0.0",
     "tenacity>=8.2.0",
     "asyncio-throttle>=1.0.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]

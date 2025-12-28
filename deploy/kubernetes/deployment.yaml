@@ -1,0 +1,267 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vmware-ai-ops
+  labels:
+    app.kubernetes.io/name: vmware-ai-ops-agent
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vmware-credentials
+  namespace: vmware-ai-ops
+type: Opaque
+stringData:
+  vrops-username: ""
+  vrops-password: ""
+  vrli-username: ""
+  vrli-password: ""
+  vcenter-username: ""
+  vcenter-password: ""
+  llm-api-key: ""
+  slack-webhook-url: ""
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmware-ai-agent-config
+  namespace: vmware-ai-ops
+data:
+  settings.yaml: |
+    vrops:
+      host: vrops.example.com
+      port: 443
+      verify_ssl: true
+      timeout: 30
+
+    vrli:
+      host: vrli.example.com
+      port: 443
+      verify_ssl: true
+      timeout: 30
+
+    vcenter:
+      host: vcenter.example.com
+      port: 443
+      verify_ssl: true
+      dry_run: true
+
+    llm:
+      endpoint: http://lightllm-service:8000/v1
+      model: mistral-7b-instruct
+      max_tokens: 4096
+      temperature: 0.1
+
+    vector_db:
+      type: chromadb
+      persist_directory: /app/data/chromadb
+      collection_name: vmware_incidents
+
+    agent:
+      cycle_interval: 300
+      thresholds:
+        cpu_critical: 90
+        cpu_warning: 80
+        memory_critical: 95
+        memory_warning: 85
+        disk_latency_critical: 50
+      auto_remediate:
+        enabled: false
+        require_approval: true
+        max_actions_per_hour: 10
+        allowed_actions:
+          - vmotion
+          - drs_rebalance
+          - snapshot_cleanup
+        forbidden_actions:
+          - vm_power_off
+          - host_maintenance_mode
+
+    notifications:
+      slack:
+        enabled: false
+        channel: "#vmware-ops"
+
+    logging:
+      level: INFO
+      format: json
+
+    metrics:
+      enabled: true
+      port: 9090
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmware-ai-agent
+  namespace: vmware-ai-ops
+  labels:
+    app: vmware-ai-agent
+    app.kubernetes.io/name: vmware-ai-ops-agent
+    app.kubernetes.io/component: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmware-ai-agent
+  template:
+    metadata:
+      labels:
+        app: vmware-ai-agent
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: vmware-ai-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: agent
+          image: registry.gitlab.com/nikosa/vmware-ai-ops-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: VMWARE_AI_VROPS__USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vrops-username
+            - name: VMWARE_AI_VROPS__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vrops-password
+            - name: VMWARE_AI_VRLI__USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vrli-username
+            - name: VMWARE_AI_VRLI__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vrli-password
+            - name: VMWARE_AI_VCENTER__USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vcenter-username
+            - name: VMWARE_AI_VCENTER__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: vcenter-password
+            - name: VMWARE_AI_LLM__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: llm-api-key
+            - name: VMWARE_AI_NOTIFICATIONS__SLACK__WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: vmware-credentials
+                  key: slack-webhook-url
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: vmware-ai-agent-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: vmware-ai-agent-data
+        - name: logs
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmware-ai-agent
+  namespace: vmware-ai-ops
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmware-ai-agent
+  namespace: vmware-ai-ops
+  labels:
+    app: vmware-ai-agent
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: vmware-ai-agent
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vmware-ai-agent-data
+  namespace: vmware-ai-ops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vmware-ai-agent
+  namespace: vmware-ai-ops
+  labels:
+    app: vmware-ai-agent
+spec:
+  selector:
+    matchLabels:
+      app: vmware-ai-agent
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
