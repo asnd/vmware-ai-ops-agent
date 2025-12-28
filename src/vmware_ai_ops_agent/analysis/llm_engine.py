@@ -14,6 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..collectors.models import Alert, InfrastructureState, LogEntry, ResourceHealth
 from ..config import LLMConfig
+from ..utils.security import scrub_sensitive_data
 from .models import (
     ActionType,
     AnalysisResult,
@@ -101,9 +102,9 @@ class LLMAnalysisEngine:
         start_time = time.time()
         total_tokens = 0
 
-        metrics_text = self._format_metrics(state.resources)
-        alerts_text = self._format_alerts(state.alerts)
-        logs_text = self._format_logs(state.recent_logs)
+        metrics_text = scrub_sensitive_data(self._format_metrics(state.resources))
+        alerts_text = scrub_sensitive_data(self._format_alerts(state.alerts))
+        logs_text = scrub_sensitive_data(self._format_logs(state.recent_logs))
 
         user_prompt = f"""Analyze the following VMware infrastructure state:
 
