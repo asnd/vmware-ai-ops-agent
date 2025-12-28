@@ -136,23 +136,33 @@ class VMwareAIOpsAgent:
     async def _collect_infrastructure_state(self) -> InfrastructureState:
         state = InfrastructureState()
 
-        try:
-            async with VROpsCollector(self.settings.vrops) as vrops:
-                resources, alerts, recommendations, anomalies = await vrops.collect_all()
-                state.resources = resources
-                state.alerts = alerts
-                state.recommendations = recommendations
-                state.anomalies.extend(anomalies)
-        except Exception as e:
-            logger.error("vROps collection failed", error=str(e))
+        async def collect_vrops():
+            try:
+                async with VROpsCollector(self.settings.vrops) as vrops:
+                    return await vrops.collect_all()
+            except Exception as e:
+                logger.error("vROps collection failed", error=str(e))
+                return [], [], [], []
 
-        try:
-            async with VRLICollector(self.settings.vrli) as vrli:
-                logs, log_anomalies = await vrli.collect_all()
-                state.recent_logs = logs
-                state.anomalies.extend(log_anomalies)
-        except Exception as e:
-            logger.error("vRLI collection failed", error=str(e))
+        async def collect_vrli():
+            try:
+                async with VRLICollector(self.settings.vrli) as vrli:
+                    return await vrli.collect_all()
+            except Exception as e:
+                logger.error("vRLI collection failed", error=str(e))
+                return [], []
+
+        vrops_result, vrli_result = await asyncio.gather(collect_vrops(), collect_vrli())
+
+        resources, alerts, recommendations, anomalies = vrops_result
+        logs, log_anomalies = vrli_result
+
+        state.resources = resources
+        state.alerts = alerts
+        state.recommendations = recommendations
+        state.anomalies.extend(anomalies)
+        state.recent_logs = logs
+        state.anomalies.extend(log_anomalies)
 
         logger.info("Infrastructure state collected", resources=len(state.resources), logs=len(state.recent_logs))
         return state

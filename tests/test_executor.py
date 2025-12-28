@@ -16,7 +16,7 @@ from vmware_ai_ops_agent.analysis.models import (
     ActionType,
     RemediationPlan,
     RemediationStep,
-    RiskLevel,
+    Urgency,
 )
 from vmware_ai_ops_agent.config import AgentConfig, AutoRemediateConfig
 
@@ -32,7 +32,7 @@ class TestActionExecutor:
                 require_approval=False,
                 max_actions_per_hour=10,
                 allowed_actions=["vmotion", "drs_rebalance", "notify"],
-                forbidden_actions=["vm_power_off"],
+                forbidden_actions=["host_maintenance"],
             )
         )
 
@@ -55,7 +55,7 @@ class TestActionExecutor:
             id="plan-001",
             title="Test Remediation",
             description="Test plan for unit tests",
-            risk_level=RiskLevel.LOW,
+            urgency=Urgency.LOW,
             auto_executable=True,
             steps=[
                 RemediationStep(
@@ -93,12 +93,12 @@ class TestActionExecutor:
             id="plan-002",
             title="Forbidden Action Plan",
             description="Plan with forbidden action",
-            risk_level=RiskLevel.HIGH,
+            urgency=Urgency.HIGH,
             steps=[
                 RemediationStep(
                     order=1,
-                    action_type=ActionType.VM_POWER_OFF,
-                    description="Power off VM",
+                    action_type=ActionType.HOST_MAINTENANCE,
+                    description="Enter Maintenance Mode",
                     target_resource="vm-001",
                     requires_approval=False,
                     estimated_duration="30 seconds",
@@ -122,7 +122,7 @@ class TestActionExecutor:
             id="plan-003",
             title="Many Actions Plan",
             description="Plan with many actions",
-            risk_level=RiskLevel.LOW,
+            urgency=Urgency.LOW,
             steps=[
                 RemediationStep(
                     order=i,
@@ -153,7 +153,7 @@ class TestActionExecutor:
             id="plan-004",
             title="Approval Required Plan",
             description="Plan requiring approval",
-            risk_level=RiskLevel.MEDIUM,
+            urgency=Urgency.MEDIUM,
             steps=[
                 RemediationStep(
                     order=1,
@@ -181,7 +181,7 @@ class TestActionExecutor:
             id="plan-005",
             title="Approved Plan",
             description="Plan with approval",
-            risk_level=RiskLevel.MEDIUM,
+            urgency=Urgency.MEDIUM,
             steps=[
                 RemediationStep(
                     order=1,
@@ -231,7 +231,7 @@ class TestExecutionResult:
             id="plan-006",
             title="Test Plan",
             description="Test",
-            risk_level=RiskLevel.LOW,
+            urgency=Urgency.LOW,
             steps=[],
         )
         step = RemediationStep(

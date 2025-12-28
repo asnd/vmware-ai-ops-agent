@@ -21,12 +21,14 @@ from vmware_ai_ops_agent.config import (
 from vmware_ai_ops_agent.collectors.models import (
     ResourceKind,
     ResourceHealth,
-    VMwareResource,
+    ResourceIdentifier,
     Alert,
-    AlertSeverity,
+    Severity,
     InfrastructureState,
+    Metric,
 )
 from vmware_ai_ops_agent.analysis.models import Urgency
+from datetime import datetime
 
 
 @pytest.fixture
@@ -50,32 +52,32 @@ def test_settings() -> Settings:
 def sample_resource() -> ResourceHealth:
     """Create a sample resource health object."""
     return ResourceHealth(
-        resource=VMwareResource(
+        resource=ResourceIdentifier(
             id="vm-123",
             name="test-vm-01",
             kind=ResourceKind.VIRTUAL_MACHINE,
-            moref="vm-123",
         ),
+        health_state="GREEN",
         health_score=75.0,
         metrics={
-            "cpu|usage_average": 45.0,
-            "mem|usage_average": 60.0,
-            "disk|commandsAveraged_average": 10.0,
+            "cpu|usage_average": Metric(resource_id="vm-123", resource_name="test-vm-01", stat_key="cpu|usage_average", values=[45.0]),
+            "mem|usage_average": Metric(resource_id="vm-123", resource_name="test-vm-01", stat_key="mem|usage_average", values=[60.0]),
         },
     )
 
 
 @pytest.fixture
-def sample_alert() -> Alert:
+def sample_alert(sample_resource) -> Alert:
     """Create a sample alert."""
     return Alert(
         id="alert-456",
+        alert_definition_id="def-1",
         name="High CPU Usage",
-        severity=AlertSeverity.WARNING,
+        description="CPU usage exceeded 80%",
+        severity=Severity.WARNING,
         status="ACTIVE",
-        resource_id="vm-123",
-        resource_name="test-vm-01",
-        message="CPU usage exceeded 80%",
+        resource=sample_resource.resource,
+        start_time=datetime.utcnow(),
     )
 
 
@@ -125,10 +127,11 @@ def mock_llm_engine():
     engine = AsyncMock()
     engine.analyze_infrastructure = AsyncMock(
         return_value=AnalysisResult(
+            id="analysis-123",
             summary="Test analysis complete",
             urgency=Urgency.LOW,
-            findings=[],
-            predictions=[],
+            insights=[],
+            predicted_failures=[],
         )
     )
     return engine
