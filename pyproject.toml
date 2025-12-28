@@ -1,0 +1,57 @@
+[project]
+name = "vmware-ai-ops-agent"
+version = "1.0.0"
+description = "AI-powered proactive maintenance agent for VMware vROps and vRLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Security Research Team"}
+]
+keywords = ["vmware", "vrops", "vrli", "ai", "ops", "monitoring", "llm"]
+
+dependencies = [
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "openai>=1.0.0",
+    "chromadb>=0.4.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "apscheduler>=3.10.0",
+    "jinja2>=3.1.0",
+    "prometheus-client>=0.19.0",
+    "structlog>=23.0.0",
+    "tenacity>=8.2.0",
+    "asyncio-throttle>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+vmware-ai-agent = "vmware_ai_ops_agent.cli:app"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

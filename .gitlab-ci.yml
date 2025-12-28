@@ -1,0 +1,66 @@
+# VMware AI Ops Agent - GitLab CI/CD Pipeline
+
+stages:
+  - lint
+  - test
+  - build
+  - deploy
+
+variables:
+  PYTHON_VERSION: "3.11"
+  DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}
+
+# Lint Stage
+lint:python:
+  stage: lint
+  image: python:${PYTHON_VERSION}-slim
+  before_script:
+    - pip install ruff black mypy
+  script:
+    - ruff check src/
+    - black --check src/
+    - mypy src/ || true
+
+# Test Stage
+test:unit:
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  before_script:
+    - pip install -e ".[dev]"
+  script:
+    - pytest tests/ -v --cov=src/vmware_ai_ops_agent --cov-report=xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+# Build Stage
+build:docker:
+  stage: build
+  image: docker:24-git
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t ${DOCKER_IMAGE}:${CI_COMMIT_SHORT_SHA} -t ${DOCKER_IMAGE}:latest .
+    - docker push ${DOCKER_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    - docker push ${DOCKER_IMAGE}:latest
+  only:
+    - main
+    - tags
+
+# Deploy Stage
+deploy:dev:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl apply -f deploy/kubernetes/ -n vmware-ops-dev
+    - kubectl set image deployment/vmware-ai-ops-agent agent=${DOCKER_IMAGE}:${CI_COMMIT_SHORT_SHA} -n vmware-ops-dev
+  environment:
+    name: development
+  only:
+    - main
+  when: manual
