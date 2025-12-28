@@ -35,8 +35,8 @@ This project skeleton has been created. The full implementation is available in 
 - [ ] `docker-compose.yaml` - Full stack compose file
 
 ### Tests
-- [ ] `tests/conftest.py` - Pytest fixtures
-- [ ] `tests/test_correlation.py` - Correlation engine tests
+- [x] `tests/conftest.py` - Pytest fixtures
+- [x] `tests/test_correlation.py` - Correlation engine tests
 
 ### Documentation
 - [x] README.md - Created
