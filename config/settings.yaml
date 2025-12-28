@@ -1,21 +1,117 @@
 # VMware AI Ops Agent Configuration
-# Full configuration template in conversation history
+# Copy this file to settings.local.yaml and update with your values
 
+# vRealize Operations (vROps) Configuration
 vrops:
-  host: "vrops.example.com"
-  username: "${VROPS_USERNAME}"
-  password: "${VROPS_PASSWORD}"
+  host: vrops.example.com
+  port: 443
+  username: ${VROPS_USERNAME}
+  password: ${VROPS_PASSWORD}
+  verify_ssl: true
+  timeout: 30
 
+# vRealize Log Insight (vRLI) Configuration
 vrli:
-  host: "vrli.example.com"
-  username: "${VRLI_USERNAME}"
-  password: "${VRLI_PASSWORD}"
+  host: vrli.example.com
+  port: 443
+  username: ${VRLI_USERNAME}
+  password: ${VRLI_PASSWORD}
+  verify_ssl: true
+  timeout: 30
+  query:
+    default_time_range: LAST_1_HOUR
+    max_results: 10000
 
+# vCenter Server Configuration (for remediation actions)
+vcenter:
+  host: vcenter.example.com
+  port: 443
+  username: ${VCENTER_USERNAME}
+  password: ${VCENTER_PASSWORD}
+  verify_ssl: true
+  dry_run: true  # Set to false to enable actual remediation
+
+# LLM Configuration (LightLLM/vLLM/OpenAI-compatible endpoint)
 llm:
-  endpoint: "http://localhost:8000/v1"
-  model: "mistral-7b-instruct"
+  endpoint: http://localhost:8000/v1
+  api_key: ${LLM_API_KEY}
+  model: mistral-7b-instruct
+  max_tokens: 4096
+  temperature: 0.1
+  max_retries: 3
 
+# Vector Database Configuration (ChromaDB)
+vector_db:
+  type: chromadb
+  persist_directory: ./data/chromadb
+  collection_name: vmware_incidents
+
+# Agent Configuration
 agent:
-  cycle_interval: 300
+  cycle_interval: 300  # Analysis cycle interval in seconds
+
+  # Health thresholds for alerting
+  thresholds:
+    cpu_critical: 90
+    cpu_warning: 80
+    memory_critical: 95
+    memory_warning: 85
+    disk_latency_critical: 50  # milliseconds
+
+  # Auto-remediation settings
   auto_remediate:
+    enabled: false              # Master switch for auto-remediation
+    require_approval: true      # Require human approval for actions
+    max_actions_per_hour: 10    # Rate limiting
+
+    # Actions that are allowed to execute automatically
+    allowed_actions:
+      - vmotion
+      - drs_rebalance
+      - snapshot_cleanup
+
+    # Actions that are NEVER allowed (safety guard)
+    forbidden_actions:
+      - vm_power_off
+      - host_maintenance_mode
+
+# Notification Configuration
+notifications:
+  slack:
     enabled: false
+    webhook_url: ${SLACK_WEBHOOK_URL}
+    channel: "#vmware-ops"
+    mention_on_critical: "@oncall"
+
+  email:
+    enabled: false
+    smtp_host: smtp.example.com
+    smtp_port: 587
+    smtp_user: ""
+    smtp_password: ${SMTP_PASSWORD}
+    from_address: vmware-ai-agent@example.com
+    recipients: []
+
+  servicenow:
+    enabled: false
+    instance: example.service-now.com
+    username: ${SNOW_USERNAME}
+    password: ${SNOW_PASSWORD}
+
+# Knowledge Base Configuration
+knowledge_base:
+  runbooks_dir: ./config/runbooks
+  kb_cache_dir: ./data/kb_cache
+  history_retention: 90  # days
+
+# Logging Configuration
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  format: json  # json or console
+  file: ./logs/agent.log
+
+# Prometheus Metrics Configuration
+metrics:
+  enabled: true
+  port: 9090
+  path: /metrics
