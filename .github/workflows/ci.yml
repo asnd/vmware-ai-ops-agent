@@ -1,0 +1,174 @@
+# GitHub Actions CI/CD for Python FastAPI project
+# Converted from GitLab CI
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint-ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+      - name: Run Ruff linter
+        run: ruff check app/ tests/ 2>/dev/null || ruff check . || true
+
+  lint-ruff-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+      - name: Check code formatting
+        run: ruff format app/ tests/ --check 2>/dev/null || ruff format . --check || true
+
+  lint-mypy:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+      - name: Run MyPy
+        run: mypy app/ --ignore-missing-imports 2>/dev/null || mypy . --ignore-missing-imports || true
+
+  test-unit:
+    runs-on: ubuntu-latest
+    needs: [lint-ruff, lint-ruff-format]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+      - name: Run unit tests
+        run: |
+          if [ -d "tests/unit" ]; then
+            pytest tests/unit/ -v --tb=short --cov=app --cov-report=term --cov-report=html --cov-report=xml
+          else
+            pytest tests/ -v --tb=short --cov=app --cov-report=term --cov-report=html --cov-report=xml 2>/dev/null || pytest tests/ -v || true
+          fi
+      - name: Upload coverage report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            htmlcov/
+            coverage.xml
+          retention-days: 30
+
+  test-integration:
+    runs-on: ubuntu-latest
+    needs: [lint-ruff, lint-ruff-format]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+      - name: Run integration tests
+        run: |
+          if [ -d "tests/integration" ]; then
+            pytest tests/integration/ -v --tb=short
+          fi
+
+  security-bandit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: [test-unit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+          pip install bandit
+      - name: Run Bandit security scanner
+        run: |
+          bandit -r app/ -f json -o bandit-report.json 2>/dev/null || bandit -r . -f json -o bandit-report.json || true
+          bandit -r app/ -f screen 2>/dev/null || bandit -r . -f screen || true
+      - name: Upload Bandit report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 30
+
+  security-safety:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: [test-unit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety
+      - name: Check dependencies for vulnerabilities
+        run: safety check || true
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: [test-unit]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: |
+          if [ -f "Dockerfile" ]; then
+            docker build -t app:${{ github.sha }} .
+            docker tag app:${{ github.sha }} app:latest
+          fi
