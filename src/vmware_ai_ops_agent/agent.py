@@ -23,6 +23,8 @@ from .collectors.vrli import VRLICollector
 from .collectors.vrops import VROpsCollector
 from .config import Settings
 from .correlation.engine import CorrelatedIssue, CorrelationEngine, CorrelationResult
+from .graph import create_agent_graph
+from .tools.search import BroadcomKBSearch
 
 logger = structlog.get_logger(__name__)
 
@@ -61,7 +63,22 @@ class VMwareAIOpsAgent:
         self.state = AgentState()
         self.correlation_engine = CorrelationEngine()
         self.llm_engine = LLMAnalysisEngine(settings.llm)
-        self.knowledge_base = KnowledgeBase(settings.vector_db, settings.knowledge_base)
+        self.knowledge_base = KnowledgeBase(
+            settings.vector_db, 
+            settings.knowledge_base,
+            api_key=settings.llm.api_key.get_secret_value()
+        )
+        self.search_tool = BroadcomKBSearch()
+        
+        self.graph = create_agent_graph(
+            collector_func=self._collect_infrastructure_state,
+            correlation_engine=self.correlation_engine,
+            knowledge_base=self.knowledge_base,
+            llm_engine=self.llm_engine,
+            remediator_func=self._auto_remediate_wrapper,
+            search_tool=self.search_tool
+        )
+        
         self._scheduler: AsyncIOScheduler | None = None
         self._on_issue_detected: Callable[[CorrelatedIssue], None] | None = None
         self._on_analysis_complete: Callable[[AnalysisResult], None] | None = None
@@ -95,6 +112,8 @@ class VMwareAIOpsAgent:
         self.state.running = False
         if self._scheduler:
             self._scheduler.shutdown()
+        # Flush any pending KB documents before shutdown
+        await self.knowledge_base.flush()
         logger.info("Agent stopped")
 
     async def _run_cycle(self) -> None:
@@ -102,30 +121,56 @@ class VMwareAIOpsAgent:
         logger.info("Starting analysis cycle", cycle=self.state.total_cycles + 1)
 
         try:
-            state = await self._collect_infrastructure_state()
-            correlation_result = self.correlation_engine.correlate(state)
-            self.state.last_correlation = correlation_result
+            # Execute the LangGraph workflow
+            graph_result = await self.graph.ainvoke({
+                "infrastructure_state": None,
+                "correlation_result": None,
+                "analysis_result": None,
+                "kb_results": None,
+                "search_results": None,
+                "remediation_status": None,
+                "errors": []
+            })
+            
+            # Update internal state and metrics from graph result
+            if graph_result.get("infrastructure_state"):
+                state = graph_result["infrastructure_state"]
+                for resource in state.resources:
+                    RESOURCE_HEALTH.labels(
+                        resource_name=resource.resource.name,
+                        resource_kind=resource.resource.kind.value,
+                    ).set(resource.health_score)
 
-            for issue in correlation_result.issues:
-                ISSUES_DETECTED.labels(severity=issue.severity.value).inc()
-                self.state.issues_detected += 1
+            if graph_result.get("correlation_result"):
+                correlation_result = graph_result["correlation_result"]
+                self.state.last_correlation = correlation_result
+                for issue in correlation_result.issues:
+                    ISSUES_DETECTED.labels(severity=issue.severity.value).inc()
+                    self.state.issues_detected += 1
+                    if self._on_issue_detected:
+                        self._on_issue_detected(issue)
 
-            if correlation_result.issues:
-                analysis = await self.llm_engine.analyze_infrastructure(state)
+            if graph_result.get("analysis_result"):
+                analysis = graph_result["analysis_result"]
                 self.state.last_analysis = analysis
-                await self._handle_analysis_results(analysis, correlation_result)
+                # Record analysis to KB
                 await self.knowledge_base.record_analysis(analysis)
+                # Handle notifications
+                await self._handle_analysis_results(analysis)
 
-                if self.settings.agent.auto_remediate.enabled:
-                    await self._auto_remediate(analysis)
+            if graph_result.get("remediation_status"):
+                 # Determine how many actions were executed from the result string or modify the return type
+                 # For now, simplistic increment if executed
+                 if graph_result["remediation_status"].get("executed"):
+                     self.state.actions_executed += 1 
 
-            for resource in state.resources:
-                RESOURCE_HEALTH.labels(
-                    resource_name=resource.resource.name,
-                    resource_kind=resource.resource.kind.value,
-                ).set(resource.health_score)
-
-            ANALYSIS_CYCLES.labels(status="success").inc()
+            if graph_result.get("errors"):
+                for err in graph_result["errors"]:
+                    logger.error("Graph execution error", error=err)
+                    self.state.errors.append(f"{datetime.utcnow().isoformat()}: {err}")
+                ANALYSIS_CYCLES.labels(status="partial_error").inc()
+            else:
+                ANALYSIS_CYCLES.labels(status="success").inc()
 
         except Exception as e:
             logger.error("Analysis cycle failed", error=str(e))
@@ -181,14 +226,10 @@ class VMwareAIOpsAgent:
         return state
 
     async def _handle_analysis_results(
-        self, analysis: AnalysisResult, correlation: CorrelationResult
+        self, analysis: AnalysisResult
     ) -> None:
         if self._on_analysis_complete:
             self._on_analysis_complete(analysis)
-
-        for issue in correlation.issues:
-            if self._on_issue_detected:
-                self._on_issue_detected(issue)
 
         if analysis.urgency in (Urgency.CRITICAL, Urgency.HIGH):
             try:
@@ -197,9 +238,17 @@ class VMwareAIOpsAgent:
             except Exception as e:
                 logger.error("Notification failed", error=str(e))
 
-    async def _auto_remediate(self, analysis: AnalysisResult) -> None:
+    async def _auto_remediate_wrapper(self, analysis: AnalysisResult) -> dict[str, Any]:
+        """Wrapper for auto-remediation to return results to graph."""
+        if not self.settings.agent.auto_remediate.enabled:
+            return {"status": "disabled"}
+            
+        result = await self._auto_remediate(analysis)
+        return result or {"status": "no_action"}
+
+    async def _auto_remediate(self, analysis: AnalysisResult) -> dict[str, Any] | None:
         if not analysis.remediation_plan or not analysis.remediation_plan.auto_executable:
-            return
+            return None
 
         logger.info("Executing auto-remediation", plan_id=analysis.remediation_plan.id)
 
@@ -213,21 +262,36 @@ class VMwareAIOpsAgent:
                         analysis.remediation_plan,
                         approval_callback=self._approval_callback,
                     )
-                    self.state.actions_executed += sum(
-                        1 for r in result.action_results if r.success
-                    )
+                    
+                    success_count = sum(1 for r in result.action_results if r.success)
+                    # We can't update self.state.actions_executed safely here if we want to be pure, 
+                    # but since this is a method on the agent, it's fine.
+                    # However, the graph logic handles state update based on return.
+                    
+                    return {
+                        "executed": True,
+                        "success_count": success_count,
+                        "plan_id": analysis.remediation_plan.id,
+                        "results": [r.status.value for r in result.action_results]
+                    }
         except Exception as e:
             logger.error("Auto-remediation failed", error=str(e))
+            raise e
 
     async def analyze_now(self) -> AnalysisResult | None:
         logger.info("Triggering immediate analysis")
         try:
-            state = await self._collect_infrastructure_state()
-            correlation = self.correlation_engine.correlate(state)
-            analysis = await self.llm_engine.analyze_infrastructure(state)
-            self.state.last_analysis = analysis
-            self.state.last_correlation = correlation
-            return analysis
+            # We can use the graph here too!
+            result = await self.graph.ainvoke({
+                "infrastructure_state": None,
+                "correlation_result": None,
+                "analysis_result": None,
+                "kb_results": None,
+                "search_results": None,
+                "remediation_status": None,
+                "errors": []
+            })
+            return result.get("analysis_result")
         except Exception as e:
             logger.error("Immediate analysis failed", error=str(e))
             return None

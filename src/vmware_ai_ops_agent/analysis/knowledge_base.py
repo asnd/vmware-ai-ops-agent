@@ -2,6 +2,8 @@
 Knowledge base for storing and retrieving similar incidents.
 """
 
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,17 +11,17 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
-try:
-    import chromadb
-
-    CHROMADB_AVAILABLE = True
-except ImportError:
-    CHROMADB_AVAILABLE = False
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_core.documents import Document
 
 from ..config import KnowledgeBaseConfig, VectorDBConfig
 from .models import AnalysisResult
 
 logger = structlog.get_logger(__name__)
+
+# Checksum file for FAISS index integrity validation
+CHECKSUM_FILE = "index.checksum"
 
 
 class Incident(BaseModel):
@@ -46,32 +48,74 @@ class SimilarityResult(BaseModel):
 
 
 class KnowledgeBase:
-    """Knowledge base for VMware infrastructure operations."""
+    """Knowledge base for VMware infrastructure operations using FAISS."""
 
-    def __init__(self, vector_config: VectorDBConfig, kb_config: KnowledgeBaseConfig):
+    def __init__(self, vector_config: VectorDBConfig, kb_config: KnowledgeBaseConfig, api_key: str):
         self.vector_config = vector_config
         self.kb_config = kb_config
-        self._client: Any = None
-        self._collection: Any = None
+        self.api_key = api_key
+        self._db: FAISS | None = None
         self._initialized = False
+        self._embeddings = OpenAIEmbeddings(api_key=api_key)
+        # Batch save settings
+        self._pending_docs: list[Document] = []
+        self._batch_size = 10  # Save after N documents
+        self._dirty = False  # Track if there are unsaved changes
+
+    def _compute_checksum(self, persist_dir: Path) -> str:
+        """Compute SHA256 checksum of FAISS index file."""
+        index_file = persist_dir / "index.faiss"
+        if not index_file.exists():
+            return ""
+        sha256 = hashlib.sha256()
+        with open(index_file, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _save_checksum(self, persist_dir: Path) -> None:
+        """Save checksum to file."""
+        checksum = self._compute_checksum(persist_dir)
+        checksum_file = persist_dir / CHECKSUM_FILE
+        checksum_file.write_text(checksum)
+
+    def _verify_checksum(self, persist_dir: Path) -> bool:
+        """Verify FAISS index integrity before loading."""
+        checksum_file = persist_dir / CHECKSUM_FILE
+        if not checksum_file.exists():
+            logger.warning("No checksum file found, skipping integrity check")
+            return True  # Allow first-time loads without checksum
+        stored_checksum = checksum_file.read_text().strip()
+        computed_checksum = self._compute_checksum(persist_dir)
+        if stored_checksum != computed_checksum:
+            logger.error("FAISS index integrity check failed",
+                        stored=stored_checksum[:16], computed=computed_checksum[:16])
+            return False
+        return True
 
     async def initialize(self) -> None:
-        if not CHROMADB_AVAILABLE:
-            logger.warning("ChromaDB not available, knowledge base disabled")
-            return
-
         try:
             persist_dir = Path(self.vector_config.persist_directory)
-            persist_dir.mkdir(parents=True, exist_ok=True)
+            index_file = persist_dir / "index.faiss"
 
-            self._client = chromadb.PersistentClient(path=str(persist_dir))
-            self._collection = self._client.get_or_create_collection(
-                name=self.vector_config.collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
+            if index_file.exists():
+                # Security: Verify index integrity before loading
+                if not self._verify_checksum(persist_dir):
+                    logger.error("FAISS index failed integrity check, starting fresh")
+                    self._db = None
+                    self._initialized = True
+                    return
+
+                logger.info("Loading existing FAISS index", path=str(persist_dir))
+                self._db = FAISS.load_local(str(persist_dir), self._embeddings, allow_dangerous_deserialization=True)
+            else:
+                logger.info("Creating new FAISS index")
+                # FAISS requires at least one document to initialize if not loading from disk
+                # We will handle lazy init in add_incident.
+                self._db = None
 
             self._initialized = True
-            logger.info("Knowledge base initialized", documents=self._collection.count())
+            logger.info("Knowledge base initialized")
         except Exception as e:
             logger.error("Failed to initialize knowledge base", error=str(e))
             self._initialized = False
@@ -80,39 +124,87 @@ class KnowledgeBase:
         if not self._initialized:
             return
 
-        document = (
+        document_content = (
             f"Incident: {incident.summary}\n"
             f"Root Cause: {incident.root_cause}\n"
             f"Resolution: {incident.resolution}"
         )
 
+        metadata = {
+            "id": incident.id,
+            "type": "incident",
+            "summary": incident.summary,
+            "timestamp": incident.timestamp.isoformat(),
+            "root_cause": incident.root_cause
+        }
+
         try:
-            self._collection.add(
-                ids=[incident.id],
-                documents=[document],
-                metadatas=[{"type": "incident", "summary": incident.summary}],
-            )
-            logger.debug("Added incident to knowledge base", id=incident.id)
+            doc = Document(page_content=document_content, metadata=metadata)
+            self._pending_docs.append(doc)
+            self._dirty = True
+
+            # Batch save: only persist when batch size reached
+            if len(self._pending_docs) >= self._batch_size:
+                await self._flush_pending()
+
+            logger.debug("Added incident to knowledge base", id=incident.id, pending=len(self._pending_docs))
         except Exception as e:
             logger.error("Failed to add incident", error=str(e))
 
+    async def _flush_pending(self) -> None:
+        """Flush pending documents to FAISS index and persist to disk."""
+        if not self._pending_docs:
+            return
+
+        try:
+            if self._db is None:
+                self._db = FAISS.from_documents(self._pending_docs, self._embeddings)
+            else:
+                self._db.add_documents(self._pending_docs)
+
+            # Persist to disk with checksum
+            persist_dir = Path(self.vector_config.persist_directory)
+            persist_dir.mkdir(parents=True, exist_ok=True)
+            self._db.save_local(str(persist_dir))
+            self._save_checksum(persist_dir)
+
+            logger.info("Flushed knowledge base", documents=len(self._pending_docs))
+            self._pending_docs = []
+            self._dirty = False
+        except Exception as e:
+            logger.error("Failed to flush knowledge base", error=str(e))
+
+    async def flush(self) -> None:
+        """Public method to force flush pending documents (e.g., on shutdown)."""
+        if self._dirty:
+            await self._flush_pending()
+
     async def search_similar(self, query: str, n_results: int = 5) -> list[SimilarityResult]:
-        if not self._initialized:
+        if not self._initialized or self._db is None:
             return []
 
         try:
-            results = self._collection.query(query_texts=[query], n_results=n_results)
+            # FAISS similarity search returns (Document, score) tuples
+            # score is L2 distance (lower is better) or cosine similarity depending on config.
+            # OpenAI embeddings are normalized, so dot product is cosine similarity. 
+            # FAISS default is L2. 
+            # We will use similarity_search_with_score
+            results = self._db.similarity_search_with_score(query, k=n_results)
 
             similar = []
-            for i, doc_id in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i] if results.get("distances") else 0
+            for doc, score in results:
+                # Convert L2 distance to a 0-1 similarity score roughly
+                # Or just return the raw score. 
+                # For L2: 0 is identical.
+                similarity_score = 1.0 / (1.0 + score) 
+                
                 similar.append(
                     SimilarityResult(
-                        id=doc_id,
-                        document_type=results["metadatas"][0][i].get("type", "unknown"),
-                        content=results["documents"][0][i],
-                        similarity_score=1 - distance,
-                        metadata=results["metadatas"][0][i],
+                        id=doc.metadata.get("id", "unknown"),
+                        document_type=doc.metadata.get("type", "unknown"),
+                        content=doc.page_content,
+                        similarity_score=similarity_score,
+                        metadata=doc.metadata,
                     )
                 )
             return similar
@@ -138,10 +230,11 @@ class KnowledgeBase:
         await self.add_incident(incident)
 
     def get_statistics(self) -> dict[str, Any]:
-        if not self._initialized:
-            return {"initialized": False, "documents": 0}
+        if not self._initialized or self._db is None:
+            return {"initialized": self._initialized, "documents": 0, "pending": len(self._pending_docs)}
         return {
             "initialized": True,
-            "documents": self._collection.count(),
+            "documents": self._db.index.ntotal,
+            "pending": len(self._pending_docs),
             "collection": self.vector_config.collection_name,
         }
