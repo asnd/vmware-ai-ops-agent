@@ -316,6 +316,21 @@ class VROpsCollector:
 
         return anomalies
 
+    async def _collect_resources_for_kind(
+        self, kind: ResourceKind, semaphore: asyncio.Semaphore
+    ) -> list[ResourceHealth]:
+        """Collect health for all resources of a given kind."""
+        resources = await self.get_resources(resource_kind=kind)
+
+        async def get_health_with_limit(res_id: str) -> ResourceHealth | None:
+            async with semaphore:
+                return await self.get_resource_health(res_id)
+
+        tasks = [get_health_with_limit(res.id) for res in resources]
+        health_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        return [h for h in health_results if isinstance(h, ResourceHealth)]
+
     async def collect_all(
         self,
         resource_kinds: list[ResourceKind] | None = None,
@@ -328,27 +343,28 @@ class VROpsCollector:
                 ResourceKind.CLUSTER,
             ]
 
-        all_resources = []
-        for kind in resource_kinds:
-            resources = await self.get_resources(resource_kind=kind)
-            semaphore = asyncio.Semaphore(10)
+        # Shared semaphore across all resource kinds for global rate limiting
+        semaphore = asyncio.Semaphore(10)
 
-            async def get_health_with_limit(res_id: str, sem: asyncio.Semaphore):
-                async with sem:
-                    return await self.get_resource_health(res_id)
+        # Collect all resource kinds in parallel
+        resource_tasks = [
+            self._collect_resources_for_kind(kind, semaphore) for kind in resource_kinds
+        ]
 
-            tasks = [get_health_with_limit(res["identifier"], semaphore) for res in resources]
-            health_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for health in health_results:
-                if isinstance(health, ResourceHealth):
-                    all_resources.append(health)
-
-        alerts, recommendations, anomalies = await asyncio.gather(
+        # Also fetch alerts, recommendations, anomalies in parallel
+        all_results = await asyncio.gather(
+            *resource_tasks,
             self.get_alerts(),
             self.get_recommendations(),
             self.get_anomalies(),
         )
+
+        # Unpack results: first N are resource lists, last 3 are alerts/recs/anomalies
+        resource_lists = all_results[: len(resource_kinds)]
+        alerts, recommendations, anomalies = all_results[-3:]
+
+        # Flatten resource lists
+        all_resources = [r for resource_list in resource_lists for r in resource_list]
 
         logger.info(
             "vROps collection complete",
