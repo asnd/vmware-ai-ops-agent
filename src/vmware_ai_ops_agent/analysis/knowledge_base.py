@@ -3,17 +3,15 @@ Knowledge base for storing and retrieving similar incidents.
 """
 
 import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field
-
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
+from pydantic import BaseModel, Field
 
 from ..config import KnowledgeBaseConfig, VectorDBConfig
 from .models import AnalysisResult
@@ -107,7 +105,11 @@ class KnowledgeBase:
                     return
 
                 logger.info("Loading existing FAISS index", path=str(persist_dir))
-                self._db = FAISS.load_local(str(persist_dir), self._embeddings, allow_dangerous_deserialization=True)
+                self._db = FAISS.load_local(
+                    str(persist_dir),
+                    self._embeddings,
+                    allow_dangerous_deserialization=True
+                )
             else:
                 logger.info("Creating new FAISS index")
                 # FAISS requires at least one document to initialize if not loading from disk
@@ -147,7 +149,11 @@ class KnowledgeBase:
             if len(self._pending_docs) >= self._batch_size:
                 await self._flush_pending()
 
-            logger.debug("Added incident to knowledge base", id=incident.id, pending=len(self._pending_docs))
+            logger.debug(
+                "Added incident to knowledge base",
+                id=incident.id,
+                pending=len(self._pending_docs)
+            )
         except Exception as e:
             logger.error("Failed to add incident", error=str(e))
 

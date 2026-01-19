@@ -64,12 +64,12 @@ class VMwareAIOpsAgent:
         self.correlation_engine = CorrelationEngine()
         self.llm_engine = LLMAnalysisEngine(settings.llm)
         self.knowledge_base = KnowledgeBase(
-            settings.vector_db, 
+            settings.vector_db,
             settings.knowledge_base,
             api_key=settings.llm.api_key.get_secret_value()
         )
         self.search_tool = BroadcomKBSearch()
-        
+
         self.graph = create_agent_graph(
             collector_func=self._collect_infrastructure_state,
             correlation_engine=self.correlation_engine,
@@ -78,7 +78,7 @@ class VMwareAIOpsAgent:
             remediator_func=self._auto_remediate_wrapper,
             search_tool=self.search_tool
         )
-        
+
         self._scheduler: AsyncIOScheduler | None = None
         self._on_issue_detected: Callable[[CorrelatedIssue], None] | None = None
         self._on_analysis_complete: Callable[[AnalysisResult], None] | None = None
@@ -131,7 +131,7 @@ class VMwareAIOpsAgent:
                 "remediation_status": None,
                 "errors": []
             })
-            
+
             # Update internal state and metrics from graph result
             if graph_result.get("infrastructure_state"):
                 state = graph_result["infrastructure_state"]
@@ -159,10 +159,10 @@ class VMwareAIOpsAgent:
                 await self._handle_analysis_results(analysis)
 
             if graph_result.get("remediation_status"):
-                 # Determine how many actions were executed from the result string or modify the return type
+                 # Determine actions executed from result
                  # For now, simplistic increment if executed
                  if graph_result["remediation_status"].get("executed"):
-                     self.state.actions_executed += 1 
+                     self.state.actions_executed += 1
 
             if graph_result.get("errors"):
                 for err in graph_result["errors"]:
@@ -242,7 +242,7 @@ class VMwareAIOpsAgent:
         """Wrapper for auto-remediation to return results to graph."""
         if not self.settings.agent.auto_remediate.enabled:
             return {"status": "disabled"}
-            
+
         result = await self._auto_remediate(analysis)
         return result or {"status": "no_action"}
 
@@ -262,12 +262,14 @@ class VMwareAIOpsAgent:
                         analysis.remediation_plan,
                         approval_callback=self._approval_callback,
                     )
-                    
+
                     success_count = sum(1 for r in result.action_results if r.success)
-                    # We can't update self.state.actions_executed safely here if we want to be pure, 
-                    # but since this is a method on the agent, it's fine.
-                    # However, the graph logic handles state update based on return.
-                    
+                    # We can't update self.state.actions_executed safely here
+                    # if we want to be pure, but since this is a method on
+                    # the agent, it's fine. However, the graph logic handles
+                    # state update based on return.
+
+
                     return {
                         "executed": True,
                         "success_count": success_count,
