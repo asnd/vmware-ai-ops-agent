@@ -192,18 +192,19 @@ class KnowledgeBase:
         try:
             # FAISS similarity search returns (Document, score) tuples
             # score is L2 distance (lower is better) or cosine similarity depending on config.
-            # OpenAI embeddings are normalized, so dot product is cosine similarity. 
-            # FAISS default is L2. 
+            # OpenAI embeddings are normalized, so dot product is cosine similarity.
+            # FAISS default is L2.
             # We will use similarity_search_with_score
             results = self._db.similarity_search_with_score(query, k=n_results)
 
             similar = []
             for doc, score in results:
                 # Convert L2 distance to a 0-1 similarity score roughly
-                # Or just return the raw score. 
+                # Or just return the raw score.
                 # For L2: 0 is identical.
-                similarity_score = 1.0 / (1.0 + score) 
-                
+                similarity_score = 1.0 / (1.0 + score)
+
+
                 similar.append(
                     SimilarityResult(
                         id=doc.metadata.get("id", "unknown"),
