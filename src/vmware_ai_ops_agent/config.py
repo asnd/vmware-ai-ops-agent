@@ -45,8 +45,8 @@ class LLMConfig(BaseModel):
 
 
 class VectorDBConfig(BaseModel):
-    type: str = "chromadb"
-    persist_directory: str = "./data/chromadb"
+    type: str = "faiss"
+    persist_directory: str = "./data/faiss"
     collection_name: str = "vmware_incidents"
 
 

@@ -54,7 +54,7 @@ class KnowledgeBase:
         self.api_key = api_key
         self._db: FAISS | None = None
         self._initialized = False
-        self._embeddings = OpenAIEmbeddings(api_key=api_key)
+        self._embeddings = None
         # Batch save settings
         self._pending_docs: list[Document] = []
         self._batch_size = 10  # Save after N documents
@@ -93,6 +93,12 @@ class KnowledgeBase:
 
     async def initialize(self) -> None:
         try:
+            if not self.api_key:
+                logger.warning("No API key provided, knowledge base disabled")
+                return
+
+            self._embeddings = OpenAIEmbeddings(api_key=self.api_key)
+
             persist_dir = Path(self.vector_config.persist_directory)
             index_file = persist_dir / "index.faiss"
 
@@ -162,6 +168,11 @@ class KnowledgeBase:
         if not self._pending_docs:
             return
 
+        # Guard: ensure embeddings are initialized before flush
+        if not self._initialized or self._embeddings is None:
+            logger.error("Cannot flush: knowledge base not properly initialized")
+            return
+
         try:
             if self._db is None:
                 self._db = FAISS.from_documents(self._pending_docs, self._embeddings)
@@ -203,7 +214,6 @@ class KnowledgeBase:
                 # Or just return the raw score.
                 # For L2: 0 is identical.
                 similarity_score = 1.0 / (1.0 + score)
-
 
                 similar.append(
                     SimilarityResult(

@@ -37,14 +37,54 @@ You have deep knowledge of VMware vSphere, ESXi, vCenter, storage, and networkin
 Provide structured, actionable insights with confidence levels."""
 
 
+def _safe_urgency(value: str) -> Urgency:
+    """Safely convert string to Urgency enum."""
+    if not value:
+        return Urgency.MEDIUM
+    normalized = value.lower().strip()
+    try:
+        return Urgency(normalized)
+    except ValueError:
+        # Map common variations
+        mapping = {
+            "high": Urgency.HIGH,
+            "critical": Urgency.CRITICAL,
+            "low": Urgency.LOW,
+            "medium": Urgency.MEDIUM,
+            "moderate": Urgency.MEDIUM,
+            "severe": Urgency.CRITICAL,
+            "urgent": Urgency.HIGH,
+        }
+        return mapping.get(normalized, Urgency.MEDIUM)
+
+
+def _safe_action_type(value: str) -> ActionType:
+    """Safely convert string to ActionType enum."""
+    if not value:
+        return ActionType.INVESTIGATE
+    normalized = value.lower().strip().replace(" ", "_").replace("-", "_")
+    try:
+        return ActionType(normalized)
+    except ValueError:
+        return ActionType.INVESTIGATE
+
+
 class LLMAnalysisEngine:
     """AI analysis engine using LLM for infrastructure analysis."""
 
+    # Timeout for LLM requests in seconds
+    LLM_TIMEOUT = 120
+
     def __init__(self, config: LLMConfig):
         self.config = config
+        api_key = config.api_key.get_secret_value()
+        if not api_key:
+            logger.warning("No LLM API key provided, using placeholder")
+            api_key = "not-configured"
         self.client = AsyncOpenAI(
             base_url=config.endpoint,
-            api_key=config.api_key.get_secret_value() or "not-needed",
+            api_key=api_key,
+            timeout=self.LLM_TIMEOUT,
         )
         self.model = config.model
 
@@ -99,19 +139,27 @@ class LLMAnalysisEngine:
             lines.append(f"[{timestamp}] [{log.source}] {log.text[:300]}")
         return "\n".join(lines)
 
-    async def analyze_infrastructure(self, state: InfrastructureState) -> AnalysisResult:
+    async def analyze_infrastructure(self, state: InfrastructureState, context: str = "") -> AnalysisResult:
         start_time = time.time()
         total_tokens = 0
 
         metrics_text = scrub_sensitive_data(self._format_metrics(state.resources))
         alerts_text = scrub_sensitive_data(self._format_alerts(state.alerts))
         logs_text = scrub_sensitive_data(self._format_logs(state.recent_logs))
+        
+        context_section = ""
+        if context:
+            context_section = f"""
+## Additional Context (Knowledge Base & Search Results)
+{context}
+"""
 
         user_prompt = f"""Analyze the following VMware infrastructure state:
 
 {metrics_text}
 {alerts_text}
 {logs_text}
+{context_section}
 
 Provide analysis in JSON format:
 {{
@@ -150,7 +198,7 @@ Provide analysis in JSON format:
         result = AnalysisResult(
             id=str(uuid.uuid4()),
             summary=analysis_data.get("summary", "Analysis complete"),
-            urgency=Urgency(analysis_data.get("urgency", "medium")),
+            urgency=_safe_urgency(analysis_data.get("urgency", "medium")),
             insights=analysis_data.get("insights", []),
             metrics_analyzed=len(state.resources),
             logs_analyzed=len(state.recent_logs),
@@ -197,18 +245,17 @@ Provide analysis in JSON format:
     ) -> RemediationPlan:
         steps = []
         for i, action in enumerate(analysis_data.get("recommended_actions", [])[:5], 1):
-            try:
-                action_name = action.get("action", "investigate").lower()
-                action_type = ActionType(action_name.replace(" ", "_"))
-            except ValueError:
-                action_type = ActionType.INVESTIGATE
+            action_name = action.get("action", "investigate")
+            action_type = _safe_action_type(action_name)
 
+            # All actions except NOTIFY and INVESTIGATE require human approval
+            # This is enforced at execution time, but we mark it here for clarity
             step = RemediationStep(
                 order=i,
                 action_type=action_type,
                 description=action.get("reason", action.get("action", "")),
                 target_resource=action.get("target"),
-                requires_approval=action_type not in (ActionType.NOTIFY, ActionType.INVESTIGATE),
+                requires_approval=True,  # Always require approval - executor enforces this
             )
             steps.append(step)
 
@@ -218,5 +265,6 @@ Provide analysis in JSON format:
             description="Automated remediation based on infrastructure analysis",
             urgency=urgency,
             steps=steps,
-            auto_executable=all(not s.requires_approval for s in steps),
+            # SAFETY: Never auto-execute - all plans require human confirmation
+            auto_executable=False,
         )

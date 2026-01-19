@@ -40,10 +40,10 @@ llm:
   temperature: 0.1
   max_retries: 3
 
-# Vector Database Configuration (ChromaDB)
+# Vector Database Configuration (FAISS)
 vector_db:
-  type: chromadb
-  persist_directory: ./data/chromadb
+  type: faiss
+  persist_directory: ./data/faiss
   collection_name: vmware_incidents
 
 # Agent Configuration
