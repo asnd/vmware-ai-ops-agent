@@ -59,7 +59,15 @@ class ExecutionResult:
 
 
 class ActionExecutor:
-    """Executor for remediation actions."""
+    """Executor for remediation actions.
+
+    IMPORTANT: All remediation actions require explicit human confirmation
+    before execution. This is a safety measure for production environments.
+    """
+
+    # Actions that are safe to execute without human confirmation
+    # Only logging/notification actions are considered safe
+    SAFE_ACTIONS = frozenset({ActionType.NOTIFY, ActionType.INVESTIGATE})
 
     def __init__(
         self,
@@ -133,16 +141,48 @@ class ActionExecutor:
                     )
                     continue
 
-                if step.requires_approval and self.config.auto_remediate.require_approval:
-                    if not approval_callback or not approval_callback(step):
+                # CRITICAL: All non-safe actions MUST have human confirmation
+                # This is a hard requirement for production safety
+                requires_human_approval = step.action_type not in self.SAFE_ACTIONS
+
+                if requires_human_approval:
+                    if not approval_callback:
+                        logger.warning(
+                            "Action requires human confirmation but no callback provided",
+                            action=step.action_type.value,
+                            target=step.target_resource,
+                        )
                         result.action_results.append(
                             ActionResult(
                                 step=step,
                                 status=ExecutionStatus.SKIPPED,
-                                error="Approval required",
+                                error="Human confirmation required - no approval callback",
                             )
                         )
                         continue
+
+                    # Always require explicit approval for non-safe actions
+                    approved = approval_callback(step)
+                    if not approved:
+                        logger.info(
+                            "Action rejected by human operator",
+                            action=step.action_type.value,
+                            target=step.target_resource,
+                        )
+                        result.action_results.append(
+                            ActionResult(
+                                step=step,
+                                status=ExecutionStatus.SKIPPED,
+                                error="Rejected by human operator",
+                            )
+                        )
+                        continue
+
+                    logger.info(
+                        "Action approved by human operator",
+                        action=step.action_type.value,
+                        target=step.target_resource,
+                    )
 
                 action_result = await self._execute_step(step, dry_run or False)
                 result.action_results.append(action_result)
@@ -150,11 +190,8 @@ class ActionExecutor:
                 if action_result.success:
                     self._action_count_hour += 1
 
-                is_critical = step.action_type not in (
-                    ActionType.NOTIFY,
-                    ActionType.INVESTIGATE,
-                )
-                if not action_result.success and is_critical:
+                # Non-safe actions failing should stop the plan
+                if not action_result.success and requires_human_approval:
                     result.status = ExecutionStatus.FAILED
                     break
             else:

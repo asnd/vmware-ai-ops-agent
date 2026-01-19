@@ -28,7 +28,6 @@ services:
     networks:
       - vmware-ai-network
     depends_on:
-      - chromadb
       - lightllm
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/metrics"]
@@ -36,25 +35,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: vmware-ai-chromadb
-    restart: unless-stopped
-    ports:
-      - "8001:8000"
-    volumes:
-      - chromadb_data:/chroma/chroma
-    environment:
-      - CHROMA_SERVER_AUTH_PROVIDER=
-      - ANONYMIZED_TELEMETRY=False
-    networks:
-      - vmware-ai-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   lightllm:
     image: ghcr.io/modelfamily/lightllm:latest
@@ -123,6 +103,5 @@ networks:
     driver: bridge
 
 volumes:
-  chromadb_data:
   prometheus_data:
   grafana_data:

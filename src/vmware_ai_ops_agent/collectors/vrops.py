@@ -26,6 +26,25 @@ from .models import (
 logger = structlog.get_logger(__name__)
 
 
+def _safe_resource_kind(value: str) -> ResourceKind:
+    """Safely convert string to ResourceKind, defaulting to VIRTUAL_MACHINE."""
+    try:
+        return ResourceKind(value)
+    except ValueError:
+        logger.warning("Unknown resource kind, defaulting to VirtualMachine", kind=value)
+        return ResourceKind.VIRTUAL_MACHINE
+
+
+def _safe_timestamp(epoch_ms: int | None) -> datetime:
+    """Safely convert epoch milliseconds to datetime."""
+    if epoch_ms is None or epoch_ms == 0:
+        return datetime.utcnow()
+    try:
+        return datetime.fromtimestamp(epoch_ms / 1000)
+    except (ValueError, OSError, TypeError):
+        return datetime.utcnow()
+
+
 class VROpsCollector:
     """Collector for vRealize Operations Manager."""
 
@@ -116,7 +135,7 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=item["identifier"],
                 name=item.get("resourceKey", {}).get("name", "Unknown"),
-                kind=ResourceKind(
+                kind=_safe_resource_kind(
                     item.get("resourceKey", {}).get("resourceKindKey", "VirtualMachine")
                 ),
                 adapter_kind=item.get("resourceKey", {}).get("adapterKindKey", "VMWARE"),
@@ -148,7 +167,7 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=resource_id,
                 name=resource_key.get("name", "Unknown"),
-                kind=ResourceKind(resource_key.get("resourceKindKey", "VirtualMachine")),
+                kind=_safe_resource_kind(resource_key.get("resourceKindKey", "VirtualMachine")),
                 adapter_kind=resource_key.get("adapterKindKey", "VMWARE"),
             )
 
@@ -219,7 +238,7 @@ class VROpsCollector:
                     state=symptom_data.get("state", ""),
                     message=symptom_data.get("message", ""),
                     metric_key=symptom_data.get("metricKey"),
-                    triggered_at=datetime.fromtimestamp(symptom_data.get("startTimeUTC", 0) / 1000),
+                    triggered_at=_safe_timestamp(symptom_data.get("startTimeUTC")),
                 )
                 symptoms.append(symptom)
 
@@ -227,7 +246,7 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=item.get("resource", {}).get("identifier", ""),
                 name=resource_data.get("name", "Unknown"),
-                kind=ResourceKind(resource_data.get("resourceKindKey", "VirtualMachine")),
+                kind=_safe_resource_kind(resource_data.get("resourceKindKey", "VirtualMachine")),
             )
 
             alert = Alert(
@@ -241,7 +260,7 @@ class VROpsCollector:
                 symptoms=symptoms,
                 impact=item.get("impactMessage", ""),
                 recommendations=item.get("recommendations", []),
-                start_time=datetime.fromtimestamp(item.get("startTimeUTC", 0) / 1000),
+                start_time=_safe_timestamp(item.get("startTimeUTC")),
             )
             alerts.append(alert)
 
@@ -257,7 +276,7 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=item.get("resource", {}).get("identifier", ""),
                 name=resource_data.get("name", "Unknown"),
-                kind=ResourceKind(resource_data.get("resourceKindKey", "VirtualMachine")),
+                kind=_safe_resource_kind(resource_data.get("resourceKindKey", "VirtualMachine")),
             )
             recommendation = Recommendation(
                 id=item.get("id", ""),
@@ -267,7 +286,7 @@ class VROpsCollector:
                 reason=item.get("reason", ""),
                 savings=item.get("savings", {}),
                 confidence=item.get("confidence", 0.0),
-                created_at=datetime.fromtimestamp(item.get("createdAt", 0) / 1000),
+                created_at=_safe_timestamp(item.get("createdAt")),
             )
             recommendations.append(recommendation)
 
@@ -296,9 +315,9 @@ class VROpsCollector:
             resource = ResourceIdentifier(
                 id=item["identifier"],
                 name=resource_key.get("name", "Unknown"),
-                kind=ResourceKind(resource_key.get("resourceKindKey", "VirtualMachine")),
+                kind=_safe_resource_kind(resource_key.get("resourceKindKey", "VirtualMachine")),
             )
-            anomaly_score = item.get("statValues", {}).get("badge|anomalies", 0)
+            anomaly_score = float(item.get("statValues", {}).get("badge|anomalies", 0) or 0)
             severity = Severity.CRITICAL if anomaly_score > 75 else Severity.WARNING
 
             anomaly = Anomaly(

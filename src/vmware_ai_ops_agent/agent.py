@@ -63,6 +63,7 @@ class VMwareAIOpsAgent:
         self.state = AgentState()
         self.correlation_engine = CorrelationEngine()
         self.llm_engine = LLMAnalysisEngine(settings.llm)
+        self._metrics_server = None  # Track metrics server for cleanup
         self.knowledge_base = KnowledgeBase(
             settings.vector_db,
             settings.knowledge_base,
@@ -89,7 +90,10 @@ class VMwareAIOpsAgent:
         await self.knowledge_base.initialize()
 
         if self.settings.metrics.enabled:
+            # Note: prometheus_client's start_http_server returns None but starts a daemon thread
+            # The server cannot be cleanly stopped, but it will terminate with the process
             start_http_server(self.settings.metrics.port)
+            self._metrics_server = True  # Mark that server was started
             logger.info("Metrics server started", port=self.settings.metrics.port)
 
         self._scheduler = AsyncIOScheduler()
@@ -114,6 +118,9 @@ class VMwareAIOpsAgent:
             self._scheduler.shutdown()
         # Flush any pending KB documents before shutdown
         await self.knowledge_base.flush()
+        # Note: Prometheus HTTP server runs as daemon thread and will stop with process
+        if self._metrics_server:
+            logger.info("Metrics server will terminate with process")
         logger.info("Agent stopped")
 
     async def _run_cycle(self) -> None:
@@ -281,9 +288,13 @@ class VMwareAIOpsAgent:
             raise e
 
     async def analyze_now(self) -> AnalysisResult | None:
+        """Trigger immediate analysis outside of scheduled cycle.
+
+        Note: This runs a full cycle but does not update cycle metrics.
+        For full cycle execution with metrics, use _run_cycle() directly.
+        """
         logger.info("Triggering immediate analysis")
         try:
-            # We can use the graph here too!
             result = await self.graph.ainvoke({
                 "infrastructure_state": None,
                 "correlation_result": None,
@@ -293,7 +304,20 @@ class VMwareAIOpsAgent:
                 "remediation_status": None,
                 "errors": []
             })
-            return result.get("analysis_result")
+
+            analysis = result.get("analysis_result")
+
+            # Update state with analysis result for consistency
+            if analysis:
+                self.state.last_analysis = analysis
+                # Record to KB like _run_cycle does
+                await self.knowledge_base.record_analysis(analysis)
+
+            if result.get("errors"):
+                for err in result["errors"]:
+                    logger.error("Immediate analysis error", error=err)
+
+            return analysis
         except Exception as e:
             logger.error("Immediate analysis failed", error=str(e))
             return None

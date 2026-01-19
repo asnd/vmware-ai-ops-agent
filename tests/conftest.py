@@ -45,7 +45,7 @@ def test_settings() -> Settings:
             password="test",
             dry_run=True,
         ),
-        vector_db=VectorDBConfig(persist_directory="/tmp/test-chromadb"),
+        vector_db=VectorDBConfig(persist_directory="/tmp/test-faiss"),
         agent=AgentConfig(cycle_interval=60),
         notifications=NotificationsConfig(),
         metrics=MetricsConfig(enabled=False),
