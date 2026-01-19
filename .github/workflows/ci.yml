@@ -1,5 +1,5 @@
-# GitHub Actions CI/CD for Python FastAPI project
-# Converted from GitLab CI
+# GitHub Actions CI/CD for VMware AI Ops Agent
+# Linting, testing, and security checks
 
 name: CI
 
@@ -11,78 +11,99 @@ on:
 
 env:
   PYTHONUNBUFFERED: "1"
+  PYTHON_VERSION: "3.11"
 
 jobs:
   lint-ruff:
+    name: Lint with Ruff
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-      - name: Run Ruff linter
-        run: ruff check app/ tests/ 2>/dev/null || ruff check . || true
 
-  lint-ruff-format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-      - name: Check code formatting
-        run: ruff format app/ tests/ --check 2>/dev/null || ruff format . --check || true
+          pip install -e ".[dev]"
+
+      - name: Run Ruff linter
+        run: ruff check src/vmware_ai_ops_agent/ tests/
+
+  lint-format:
+    name: Check Code Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Check Black formatting
+        run: black src/vmware_ai_ops_agent/ tests/ --check
+
+      - name: Check Ruff formatting
+        run: ruff format src/vmware_ai_ops_agent/ tests/ --check
 
   lint-mypy:
+    name: Type Check with MyPy
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+          pip install -e ".[dev]"
+
       - name: Run MyPy
-        run: mypy app/ --ignore-missing-imports 2>/dev/null || mypy . --ignore-missing-imports || true
+        run: mypy src/vmware_ai_ops_agent/ --ignore-missing-imports
 
   test-unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    needs: [lint-ruff, lint-ruff-format]
+    needs: [lint-ruff, lint-format]
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-      - name: Run unit tests
+          pip install -e ".[dev]"
+
+      - name: Run pytest
         run: |
-          if [ -d "tests/unit" ]; then
-            pytest tests/unit/ -v --tb=short --cov=app --cov-report=term --cov-report=html --cov-report=xml
-          else
-            pytest tests/ -v --tb=short --cov=app --cov-report=term --cov-report=html --cov-report=xml 2>/dev/null || pytest tests/ -v || true
-          fi
+          pytest tests/ -v --tb=short \
+            --cov=src/vmware_ai_ops_agent \
+            --cov-report=term \
+            --cov-report=html \
+            --cov-report=xml
+
       - name: Upload coverage report
         if: success()
         uses: actions/upload-artifact@v4
@@ -93,49 +114,32 @@ jobs:
             coverage.xml
           retention-days: 30
 
-  test-integration:
-    runs-on: ubuntu-latest
-    needs: [lint-ruff, lint-ruff-format]
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-      - name: Run integration tests
-        run: |
-          if [ -d "tests/integration" ]; then
-            pytest tests/integration/ -v --tb=short
-          fi
-
   security-bandit:
+    name: Security Scan (Bandit)
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: [test-unit]
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
-      - name: Install dependencies
+
+      - name: Install Bandit
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
-          pip install bandit
+          pip install bandit[toml]
+
       - name: Run Bandit security scanner
         run: |
-          bandit -r app/ -f json -o bandit-report.json 2>/dev/null || bandit -r . -f json -o bandit-report.json || true
-          bandit -r app/ -f screen 2>/dev/null || bandit -r . -f screen || true
+          bandit -r src/vmware_ai_ops_agent/ -f json -o bandit-report.json || true
+          bandit -r src/vmware_ai_ops_agent/ -f screen
+
       - name: Upload Bandit report
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bandit-report
@@ -143,32 +147,99 @@ jobs:
           retention-days: 30
 
   security-safety:
+    name: Dependency Vulnerability Scan
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: [test-unit]
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install safety
-      - name: Check dependencies for vulnerabilities
-        run: safety check || true
 
-  build-docker:
+      - name: Check dependencies for vulnerabilities
+        run: safety check --json || true
+
+  validate-config:
+    name: Validate Configuration
     runs-on: ubuntu-latest
-    needs: [test-unit]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+    needs: [lint-ruff]
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
         run: |
-          if [ -f "Dockerfile" ]; then
-            docker build -t app:${{ github.sha }} .
-            docker tag app:${{ github.sha }} app:latest
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Validate settings can load
+        run: |
+          python -c "from vmware_ai_ops_agent.config import Settings; Settings()"
+
+  build-check:
+    name: Build Package Check
+    runs-on: ubuntu-latest
+    needs: [test-unit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package installation
+        run: |
+          pip install dist/*.whl
+          vmware-ai-agent --help
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint-ruff, lint-format, lint-mypy, test-unit, security-bandit, security-safety, validate-config, build-check]
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          echo "Lint (Ruff): ${{ needs.lint-ruff.result }}"
+          echo "Format Check: ${{ needs.lint-format.result }}"
+          echo "Type Check (MyPy): ${{ needs.lint-mypy.result }}"
+          echo "Unit Tests: ${{ needs.test-unit.result }}"
+          echo "Security (Bandit): ${{ needs.security-bandit.result }}"
+          echo "Security (Safety): ${{ needs.security-safety.result }}"
+          echo "Config Validation: ${{ needs.validate-config.result }}"
+          echo "Build Check: ${{ needs.build-check.result }}"
+
+          if [[ "${{ needs.lint-ruff.result }}" == "failure" ]] || \
+             [[ "${{ needs.lint-format.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-unit.result }}" == "failure" ]] || \
+             [[ "${{ needs.validate-config.result }}" == "failure" ]] || \
+             [[ "${{ needs.build-check.result }}" == "failure" ]]; then
+            echo "❌ Critical checks failed"
+            exit 1
           fi
+
+          echo "✅ All critical checks passed"
