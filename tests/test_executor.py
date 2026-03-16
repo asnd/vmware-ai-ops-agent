@@ -203,6 +203,32 @@ class TestActionExecutor:
 
         assert result.action_results[0].status == ExecutionStatus.COMPLETED
 
+    @pytest.mark.asyncio
+    async def test_safe_action_not_blocked_by_global_approval(self, agent_config: AgentConfig):
+        """Safe actions should not need callback when only global approval is enabled."""
+        agent_config.auto_remediate.require_approval = True
+        executor = ActionExecutor(agent_config, vcenter=None)
+
+        plan = RemediationPlan(
+            id="plan-006",
+            title="Safe Action Plan",
+            description="Safe action with global approval enabled",
+            urgency=Urgency.LOW,
+            steps=[
+                RemediationStep(
+                    order=1,
+                    action_type=ActionType.NOTIFY,
+                    description="Notify ops team",
+                    requires_approval=False,
+                    estimated_duration="1 second",
+                ),
+            ],
+        )
+
+        result = await executor.execute_plan(plan, dry_run=True)
+
+        assert result.action_results[0].status == ExecutionStatus.COMPLETED
+
 
 class TestActionResult:
     """Test suite for ActionResult."""
