@@ -52,8 +52,53 @@ VMware AI Ops Agent continuously monitors your VMware infrastructure, uses AI to
         ┌──────────┼──────────┐
         ▼          ▼          ▼
    ┌─────────┐ ┌─────────┐ ┌─────────┐
-   │  Slack  │ │  Email  │ │ServiceNow│
-   └─────────┘ └─────────┘ └─────────┘
+    │  Slack  │ │  Email  │ │ServiceNow│
+    └─────────┘ └─────────┘ └─────────┘
+```
+
+### Multi-vCenter + NSX topology options (single vROps instance)
+
+When one vROps instance manages multiple vCenters, and each vCenter has its own NSX Manager (1:1), two viable architectures are:
+
+1. **Hub-and-spoke inventory model (recommended)**
+   - Keep one `vrops` collector as the source of truth for inventory/alerts.
+   - Add a `vcenter_targets[]` list where each item contains:
+     - `vcenter_id`
+     - `vcenter` connection settings
+     - `nsx_manager` connection settings
+   - Resolve every remediation target to `vcenter_id` first, then use that mapping to call the paired NSX Manager.
+   - Pros: centralized correlation, deterministic vCenter↔NSX routing, easy safety policy per pair.
+
+2. **Per-domain execution pipeline**
+   - Build independent execution contexts (`domain`) per pair: `(vCenter, NSX Manager)`.
+   - Broadcast vROps findings into all domains, then filter by ownership tags/object lineage before actioning.
+   - Pros: stronger blast-radius isolation and clearer multi-tenant boundaries.
+
+**Suggested mapping contract**
+
+```yaml
+vrops:
+  host: vrops.example.com
+
+vcenter_targets:
+  - vcenter_id: vc-prod-01
+    vcenter:
+      host: vc-prod-01.example.com
+      username: ${VC01_USERNAME}
+      password: ${VC01_PASSWORD}
+    nsx_manager:
+      host: nsx-prod-01.example.com
+      username: ${NSX01_USERNAME}
+      password: ${NSX01_PASSWORD}
+  - vcenter_id: vc-prod-02
+    vcenter:
+      host: vc-prod-02.example.com
+      username: ${VC02_USERNAME}
+      password: ${VC02_PASSWORD}
+    nsx_manager:
+      host: nsx-prod-02.example.com
+      username: ${NSX02_USERNAME}
+      password: ${NSX02_PASSWORD}
 ```
 
 ## Quick Start

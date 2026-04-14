@@ -61,8 +61,9 @@ class ExecutionResult:
 class ActionExecutor:
     """Executor for remediation actions.
 
-    IMPORTANT: All remediation actions require explicit human confirmation
-    before execution. This is a safety measure for production environments.
+    Approval can be enforced globally (for non-safe actions) via
+    auto_remediate.require_approval, or explicitly per-step using
+    RemediationStep.requires_approval.
     """
 
     # Actions that are safe to execute without human confirmation
@@ -107,6 +108,11 @@ class ActionExecutor:
             return action_type.value in self.config.auto_remediate.allowed_actions
         return True
 
+    def _requires_human_approval(self, step: RemediationStep) -> bool:
+        if step.requires_approval:
+            return True
+        return self.config.auto_remediate.require_approval and step.action_type not in self.SAFE_ACTIONS
+
     async def execute_plan(
         self,
         plan: RemediationPlan,
@@ -141,9 +147,7 @@ class ActionExecutor:
                     )
                     continue
 
-                # CRITICAL: All non-safe actions MUST have human confirmation
-                # This is a hard requirement for production safety
-                requires_human_approval = step.action_type not in self.SAFE_ACTIONS
+                requires_human_approval = self._requires_human_approval(step)
 
                 if requires_human_approval:
                     if not approval_callback:
@@ -156,7 +160,7 @@ class ActionExecutor:
                             ActionResult(
                                 step=step,
                                 status=ExecutionStatus.SKIPPED,
-                                error="Human confirmation required - no approval callback",
+                                error="Approval required - no approval callback",
                             )
                         )
                         continue
