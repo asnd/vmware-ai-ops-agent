@@ -35,12 +35,21 @@ def _safe_resource_kind(value: str) -> ResourceKind:
         return ResourceKind.VIRTUAL_MACHINE
 
 
+def _safe_severity(value: str) -> Severity:
+    """Safely convert string to Severity, defaulting to WARNING."""
+    try:
+        return Severity(value)
+    except ValueError:
+        logger.warning("Unknown severity, defaulting to WARNING", severity=value)
+        return Severity.WARNING
+
+
 def _safe_timestamp(epoch_ms: int | None) -> datetime:
-    """Safely convert epoch milliseconds to datetime."""
+    """Safely convert epoch milliseconds to datetime (always UTC)."""
     if epoch_ms is None or epoch_ms == 0:
         return datetime.utcnow()
     try:
-        return datetime.fromtimestamp(epoch_ms / 1000)
+        return datetime.utcfromtimestamp(epoch_ms / 1000)
     except (ValueError, OSError, TypeError):
         return datetime.utcnow()
 
@@ -111,11 +120,46 @@ class VROpsCollector:
     ) -> dict[str, Any]:
         await self._ensure_authenticated()
         url = f"{self.base_url}/{endpoint}"
-        response = await self._client.request(
-            method, url, params=params, json=json_data, headers=self._get_headers()
-        )
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await self._client.request(
+                method, url, params=params, json=json_data, headers=self._get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                # Force re-authentication on the next retry attempt
+                self._token = None
+            raise
+
+    async def _paginate(
+        self,
+        method: str,
+        endpoint: str,
+        result_key: str,
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
+        page_size: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Fetch all pages from a paginated vROps endpoint."""
+        all_items: list[dict[str, Any]] = []
+        page = 0
+        base_params: dict[str, Any] = dict(params or {})
+        base_params["pageSize"] = page_size
+
+        while True:
+            base_params["page"] = page
+            data = await self._request(method, endpoint, params=base_params, json_data=json_data)
+            items = data.get(result_key, [])
+            if not items:
+                break
+            all_items.extend(items)
+            total = data.get("pageInfo", {}).get("totalCount", len(all_items))
+            if len(all_items) >= total:
+                break
+            page += 1
+
+        return all_items
 
     async def get_resources(
         self,
@@ -123,15 +167,17 @@ class VROpsCollector:
         name_filter: str | None = None,
         page_size: int = 1000,
     ) -> list[ResourceIdentifier]:
-        params = {"pageSize": page_size}
+        params: dict[str, Any] = {}
         if resource_kind:
             params["resourceKind"] = resource_kind.value
         if name_filter:
             params["name"] = name_filter
 
-        data = await self._request("GET", "resources", params=params)
+        items = await self._paginate(
+            "GET", "resources", "resourceList", params=params, page_size=page_size
+        )
         resources = []
-        for item in data.get("resourceList", []):
+        for item in items:
             resource = ResourceIdentifier(
                 id=item["identifier"],
                 name=item.get("resourceKey", {}).get("name", "Unknown"),
@@ -225,16 +271,16 @@ class VROpsCollector:
         if criticality:
             params["criticality"] = [c.value for c in criticality]
 
-        data = await self._request("GET", "alerts", params=params)
+        items = await self._paginate("GET", "alerts", "alerts", params=params)
         alerts = []
 
-        for item in data.get("alerts", []):
+        for item in items:
             symptoms = []
             for symptom_data in item.get("alertTriggeredSymptoms", []):
                 symptom = Symptom(
                     id=symptom_data.get("symptomDefinitionId", ""),
                     name=symptom_data.get("symptomName", ""),
-                    severity=Severity(symptom_data.get("severity", "WARNING")),
+                    severity=_safe_severity(symptom_data.get("severity", "WARNING")),
                     state=symptom_data.get("state", ""),
                     message=symptom_data.get("message", ""),
                     metric_key=symptom_data.get("metricKey"),
@@ -254,7 +300,7 @@ class VROpsCollector:
                 alert_definition_id=item.get("alertDefinitionId", ""),
                 name=item.get("alertDefinitionName", ""),
                 description=item.get("alertDefinitionDescription", ""),
-                severity=Severity(item.get("alertCriticality", "WARNING")),
+                severity=_safe_severity(item.get("alertCriticality", "WARNING")),
                 status=item.get("status", ""),
                 resource=resource,
                 symptoms=symptoms,
@@ -268,10 +314,10 @@ class VROpsCollector:
         return alerts
 
     async def get_recommendations(self) -> list[Recommendation]:
-        data = await self._request("GET", "recommendations")
+        items = await self._paginate("GET", "recommendations", "recommendations")
         recommendations = []
 
-        for item in data.get("recommendations", []):
+        for item in items:
             resource_data = item.get("resource", {}).get("resourceKey", {})
             resource = ResourceIdentifier(
                 id=item.get("resource", {}).get("identifier", ""),
