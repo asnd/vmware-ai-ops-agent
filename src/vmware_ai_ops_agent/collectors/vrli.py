@@ -2,7 +2,6 @@
 vRealize Log Insight API collector.
 """
 
-import asyncio
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -10,27 +9,40 @@ from typing import Any
 
 import httpx
 import structlog
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import VRLIConfig
 from .models import Anomaly, LogEntry, LogQueryResult, Severity
 
 logger = structlog.get_logger(__name__)
 
-ERROR_PATTERNS = [
-    (r"SCSI\s+sense\s+code", "disk_error", Severity.WARNING),
-    (r"SCSI\s+device\s+.*\s+not\s+ready", "disk_not_ready", Severity.CRITICAL),
-    (r"Lost\s+access\s+to\s+volume", "storage_disconnect", Severity.CRITICAL),
-    (r"APD\s+Timeout", "all_paths_down", Severity.CRITICAL),
-    (r"PDL\s+detected", "permanent_device_loss", Severity.CRITICAL),
-    (r"memory\s+balloon", "memory_pressure", Severity.WARNING),
-    (r"Out\s+of\s+memory", "oom", Severity.CRITICAL),
-    (r"swap\s+in|swap\s+out", "swapping", Severity.WARNING),
-    (r"NIC\s+link\s+is\s+down", "network_link_down", Severity.CRITICAL),
-    (r"DVPort.*blocked", "dvport_blocked", Severity.WARNING),
-    (r"packet\s+drop", "packet_loss", Severity.WARNING),
-    (r"HA\s+failover", "ha_failover", Severity.CRITICAL),
-    (r"vMotion\s+failed", "vmotion_failure", Severity.WARNING),
+# Pre-compiled patterns for performance – avoids re-compiling on every log entry
+_COMPILED_PATTERNS = [
+    (re.compile(r"SCSI\s+sense\s+code", re.IGNORECASE), "disk_error", Severity.WARNING),
+    (
+        re.compile(r"SCSI\s+device\s+.*\s+not\s+ready", re.IGNORECASE),
+        "disk_not_ready",
+        Severity.CRITICAL,
+    ),
+    (
+        re.compile(r"Lost\s+access\s+to\s+volume", re.IGNORECASE),
+        "storage_disconnect",
+        Severity.CRITICAL,
+    ),
+    (re.compile(r"APD\s+Timeout", re.IGNORECASE), "all_paths_down", Severity.CRITICAL),
+    (re.compile(r"PDL\s+detected", re.IGNORECASE), "permanent_device_loss", Severity.CRITICAL),
+    (re.compile(r"memory\s+balloon", re.IGNORECASE), "memory_pressure", Severity.WARNING),
+    (re.compile(r"Out\s+of\s+memory", re.IGNORECASE), "oom", Severity.CRITICAL),
+    (re.compile(r"swap\s+in|swap\s+out", re.IGNORECASE), "swapping", Severity.WARNING),
+    (re.compile(r"NIC\s+link\s+is\s+down", re.IGNORECASE), "network_link_down", Severity.CRITICAL),
+    (re.compile(r"DVPort.*blocked", re.IGNORECASE), "dvport_blocked", Severity.WARNING),
+    (re.compile(r"packet\s+drop", re.IGNORECASE), "packet_loss", Severity.WARNING),
+    (re.compile(r"HA\s+failover", re.IGNORECASE), "ha_failover", Severity.CRITICAL),
+    (re.compile(r"vMotion\s+failed", re.IGNORECASE), "vmotion_failure", Severity.WARNING),
 ]
+
+# Module-level lookup avoids rebuilding the map on every frequency analysis pass
+PATTERN_SEVERITY_MAP: dict[str, Severity] = {name: sev for _, name, sev in _COMPILED_PATTERNS}
 
 
 class VRLICollector:
@@ -86,6 +98,7 @@ class VRLICollector:
             "Content-Type": "application/json",
         }
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
     async def _request(
         self,
         method: str,
@@ -96,11 +109,17 @@ class VRLICollector:
         await self._ensure_authenticated()
         url = f"{self.base_url}/{endpoint}"
         headers = self._get_headers()
-        response = await self._client.request(
-            method, url, params=params, json=json_data, headers=headers
-        )
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await self._client.request(
+                method, url, params=params, json=json_data, headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                # Force re-authentication on the next retry attempt
+                self._session_id = None
+            raise
 
     def _get_time_range_params(self, time_range: str) -> dict[str, int]:
         end_time = int(datetime.utcnow().timestamp() * 1000)
@@ -170,14 +189,19 @@ class VRLICollector:
         return await self.query_logs(query, time_range, limit)
 
     async def detect_anomalies(self, time_range: str = "LAST_1_HOUR") -> list[Anomaly]:
-        anomalies = []
         recent_result = await self.query_error_logs(time_range, limit=5000)
+        anomalies = self._extract_anomalies(recent_result.entries)
+        logger.info("Log anomaly detection complete", anomalies=len(anomalies))
+        return anomalies
 
+    def _extract_anomalies(self, entries: list[LogEntry]) -> list[Anomaly]:
+        """Analyse log entries for anomaly patterns without making API calls."""
+        anomalies = []
         pattern_counts: Counter = Counter()
 
-        for entry in recent_result.entries:
-            for pattern, pattern_name, severity in ERROR_PATTERNS:
-                if re.search(pattern, entry.text, re.IGNORECASE):
+        for entry in entries:
+            for pattern, pattern_name, severity in _COMPILED_PATTERNS:
+                if pattern.search(entry.text):
                     pattern_counts[pattern_name] += 1
 
                     if severity == Severity.CRITICAL:
@@ -200,8 +224,7 @@ class VRLICollector:
 
         for pattern_name, count in pattern_counts.items():
             if count >= 10:
-                severity_map = {name: sev for _, name, sev in ERROR_PATTERNS}
-                severity = severity_map.get(pattern_name, Severity.WARNING)
+                severity = PATTERN_SEVERITY_MAP.get(pattern_name, Severity.WARNING)
 
                 anomaly = Anomaly(
                     id=f"vrli-frequency-{pattern_name}-{int(datetime.utcnow().timestamp())}",
@@ -216,15 +239,14 @@ class VRLICollector:
                 )
                 anomalies.append(anomaly)
 
-        logger.info("Log anomaly detection complete", anomalies=len(anomalies))
         return anomalies
 
     async def collect_all(
         self, time_range: str = "LAST_1_HOUR"
     ) -> tuple[list[LogEntry], list[Anomaly]]:
-        error_result, anomalies = await asyncio.gather(
-            self.query_error_logs(time_range), self.detect_anomalies(time_range)
-        )
+        # Single fetch – reuse the same entries for both log return and anomaly detection
+        error_result = await self.query_error_logs(time_range, limit=5000)
+        anomalies = self._extract_anomalies(error_result.entries)
 
         logger.info(
             "vRLI collection complete",

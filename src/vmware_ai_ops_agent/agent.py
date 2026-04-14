@@ -123,21 +123,25 @@ class VMwareAIOpsAgent:
             logger.info("Metrics server will terminate with process")
         logger.info("Agent stopped")
 
+    def _initial_graph_state(self) -> dict[str, Any]:
+        """Return a fresh initial state dict for graph invocations."""
+        return {
+            "infrastructure_state": None,
+            "correlation_result": None,
+            "analysis_result": None,
+            "kb_results": None,
+            "search_results": None,
+            "remediation_status": None,
+            "errors": [],
+        }
+
     async def _run_cycle(self) -> None:
         cycle_start = datetime.utcnow()
         logger.info("Starting analysis cycle", cycle=self.state.total_cycles + 1)
 
         try:
             # Execute the LangGraph workflow
-            graph_result = await self.graph.ainvoke({
-                "infrastructure_state": None,
-                "correlation_result": None,
-                "analysis_result": None,
-                "kb_results": None,
-                "search_results": None,
-                "remediation_status": None,
-                "errors": []
-            })
+            graph_result = await self.graph.ainvoke(self._initial_graph_state())
 
             # Update internal state and metrics from graph result
             if graph_result.get("infrastructure_state"):
@@ -285,7 +289,7 @@ class VMwareAIOpsAgent:
                     }
         except Exception as e:
             logger.error("Auto-remediation failed", error=str(e))
-            raise e
+            raise
 
     async def analyze_now(self) -> AnalysisResult | None:
         """Trigger immediate analysis outside of scheduled cycle.
@@ -295,15 +299,7 @@ class VMwareAIOpsAgent:
         """
         logger.info("Triggering immediate analysis")
         try:
-            result = await self.graph.ainvoke({
-                "infrastructure_state": None,
-                "correlation_result": None,
-                "analysis_result": None,
-                "kb_results": None,
-                "search_results": None,
-                "remediation_status": None,
-                "errors": []
-            })
+            result = await self.graph.ainvoke(self._initial_graph_state())
 
             analysis = result.get("analysis_result")
 
