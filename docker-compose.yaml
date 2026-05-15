@@ -4,7 +4,7 @@ services:
   vmware-ai-agent:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     container_name: vmware-ai-agent
     restart: unless-stopped
     ports:
@@ -14,9 +14,6 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      - VMWARE_AI_VROPS__HOST=${VROPS_HOST:-vrops.example.com}
-      - VMWARE_AI_VROPS__USERNAME=${VROPS_USERNAME}
-      - VMWARE_AI_VROPS__PASSWORD=${VROPS_PASSWORD}
       - VMWARE_AI_VRLI__HOST=${VRLI_HOST:-vrli.example.com}
       - VMWARE_AI_VRLI__USERNAME=${VRLI_USERNAME}
       - VMWARE_AI_VRLI__PASSWORD=${VRLI_PASSWORD}
@@ -25,16 +22,86 @@ services:
       - VMWARE_AI_VCENTER__PASSWORD=${VCENTER_PASSWORD}
       - VMWARE_AI_LLM__ENDPOINT=${LLM_ENDPOINT:-http://lightllm:8000/v1}
       - VMWARE_AI_LLM__API_KEY=${LLM_API_KEY}
+      # MCP Client Configuration
+      - VMWARE_AI_ARIAOPS_MCP__URL=http://ariaops-mcp:8080/mcp
+      - VMWARE_AI_ARIAOPS_MCP__ENABLED=true
+      - VMWARE_AI_ARIAOPS_MCP__AUTH_TOKEN=${ARIAOPS_MCP_TOKEN:-}
+      - VMWARE_AI_ENTRAG_MCP__URL=http://entrag-mcp:8080/mcp
+      - VMWARE_AI_ENTRAG_MCP__ENABLED=true
+      - VMWARE_AI_ENTRAG_MCP__AUTH_TOKEN=${ENTRAG_MCP_TOKEN:-}
     networks:
       - vmware-ai-network
     depends_on:
-      - lightllm
+      ariaops-mcp:
+        condition: service_healthy
+      entrag-mcp:
+        condition: service_healthy
+      lightllm:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/metrics"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  ariaops-mcp:
+    image: ${ARIAOPS_MCP_IMAGE:-ariaops-mcp:latest}
+    build:
+      context: ${ARIAOPS_MCP_PATH:-../ariaops_mcp}
+      dockerfile: Containerfile
+    container_name: ariaops-mcp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ARIAOPS_HOST=${ARIAOPS_HOST:-aria-ops.example.com}
+      - ARIAOPS_USERNAME=${ARIAOPS_USERNAME}
+      - ARIAOPS_PASSWORD=${ARIAOPS_PASSWORD}
+      - ARIAOPS_AUTH_SOURCE=${ARIAOPS_AUTH_SOURCE:-local}
+      - ARIAOPS_TRANSPORT=http
+      - ARIAOPS_PORT=8080
+      - ARIAOPS_VERIFY_SSL=${ARIAOPS_VERIFY_SSL:-true}
+      - ARIAOPS_ENABLE_WRITE_OPERATIONS=${ARIAOPS_ENABLE_WRITE:-false}
+      - ARIAOPS_LOG_LEVEL=${ARIAOPS_LOG_LEVEL:-INFO}
+      - ARIAOPS_LOG_FORMAT=json
+    networks:
+      - vmware-ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  entrag-mcp:
+    image: ${ENTRAG_MCP_IMAGE:-entrag-mcp:latest}
+    build:
+      context: ${ENTRAG_MCP_PATH:-../entrag}
+      dockerfile: Containerfile
+    container_name: entrag-mcp
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - entrag_data:/app/data
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8080
+      - LITELLM_API_BASE=${LITELLM_API_BASE:-http://lightllm:8000/v1}
+      - LITELLM_API_KEY=${LLM_API_KEY:-}
+      - LANCEDB_PATH=/app/data/lancedb
+    networks:
+      - vmware-ai-network
+    depends_on:
+      lightllm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   lightllm:
     image: ghcr.io/modelfamily/lightllm:latest
@@ -105,3 +172,4 @@ networks:
 volumes:
   prometheus_data:
   grafana_data:
+  entrag_data:

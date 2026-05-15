@@ -139,14 +139,16 @@ class LLMAnalysisEngine:
             lines.append(f"[{timestamp}] [{log.source}] {log.text[:300]}")
         return "\n".join(lines)
 
-    async def analyze_infrastructure(self, state: InfrastructureState, context: str = "") -> AnalysisResult:
+    async def analyze_infrastructure(
+        self, state: InfrastructureState, context: str = ""
+    ) -> AnalysisResult:
         start_time = time.time()
         total_tokens = 0
 
         metrics_text = scrub_sensitive_data(self._format_metrics(state.resources))
         alerts_text = scrub_sensitive_data(self._format_alerts(state.alerts))
         logs_text = scrub_sensitive_data(self._format_logs(state.recent_logs))
-        
+
         context_section = ""
         if context:
             context_section = f"""

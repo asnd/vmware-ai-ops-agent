@@ -86,8 +86,11 @@ class KnowledgeBase:
         stored_checksum = checksum_file.read_text().strip()
         computed_checksum = self._compute_checksum(persist_dir)
         if stored_checksum != computed_checksum:
-            logger.error("FAISS index integrity check failed",
-                        stored=stored_checksum[:16], computed=computed_checksum[:16])
+            logger.error(
+                "FAISS index integrity check failed",
+                stored=stored_checksum[:16],
+                computed=computed_checksum[:16],
+            )
             return False
         return True
 
@@ -112,9 +115,7 @@ class KnowledgeBase:
 
                 logger.info("Loading existing FAISS index", path=str(persist_dir))
                 self._db = FAISS.load_local(
-                    str(persist_dir),
-                    self._embeddings,
-                    allow_dangerous_deserialization=True
+                    str(persist_dir), self._embeddings, allow_dangerous_deserialization=True
                 )
             else:
                 logger.info("Creating new FAISS index")
@@ -143,7 +144,7 @@ class KnowledgeBase:
             "type": "incident",
             "summary": incident.summary,
             "timestamp": incident.timestamp.isoformat(),
-            "root_cause": incident.root_cause
+            "root_cause": incident.root_cause,
         }
 
         try:
@@ -156,9 +157,7 @@ class KnowledgeBase:
                 await self._flush_pending()
 
             logger.debug(
-                "Added incident to knowledge base",
-                id=incident.id,
-                pending=len(self._pending_docs)
+                "Added incident to knowledge base", id=incident.id, pending=len(self._pending_docs)
             )
         except Exception as e:
             logger.error("Failed to add incident", error=str(e))
@@ -248,7 +247,11 @@ class KnowledgeBase:
 
     def get_statistics(self) -> dict[str, Any]:
         if not self._initialized or self._db is None:
-            return {"initialized": self._initialized, "documents": 0, "pending": len(self._pending_docs)}
+            return {
+                "initialized": self._initialized,
+                "documents": 0,
+                "pending": len(self._pending_docs),
+            }
         return {
             "initialized": True,
             "documents": self._db.index.ntotal,

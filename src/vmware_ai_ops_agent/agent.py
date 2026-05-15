@@ -20,11 +20,11 @@ from .analysis.llm_engine import LLMAnalysisEngine
 from .analysis.models import AnalysisResult, Urgency
 from .collectors.models import InfrastructureState
 from .collectors.vrli import VRLICollector
-from .collectors.vrops import VROpsCollector
 from .config import Settings
 from .correlation.engine import CorrelatedIssue, CorrelationEngine, CorrelationResult
 from .graph import create_agent_graph
-from .tools.search import BroadcomKBSearch
+from .mcp_clients.ariaops import AriaOpsMCPClient
+from .mcp_clients.entrag import EntragMCPClient
 
 logger = structlog.get_logger(__name__)
 
@@ -56,20 +56,42 @@ class AgentState:
 
 
 class VMwareAIOpsAgent:
-    """Main AI Ops Agent for VMware infrastructure."""
+    """Main AI Ops Agent for VMware infrastructure.
+
+    Uses MCP clients for data collection (AriaOps) and knowledge
+    retrieval (EntRAG), replacing direct API clients.
+    """
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.state = AgentState()
         self.correlation_engine = CorrelationEngine()
         self.llm_engine = LLMAnalysisEngine(settings.llm)
-        self._metrics_server = None  # Track metrics server for cleanup
+        self._metrics_server = None
+
         self.knowledge_base = KnowledgeBase(
             settings.vector_db,
             settings.knowledge_base,
-            api_key=settings.llm.api_key.get_secret_value()
+            api_key=settings.llm.api_key.get_secret_value(),
         )
-        self.search_tool = BroadcomKBSearch()
+
+        # MCP Clients
+        self.ariaops_client: AriaOpsMCPClient | None = None
+        self.entrag_client: EntragMCPClient | None = None
+
+        if settings.ariaops_mcp.enabled:
+            self.ariaops_client = AriaOpsMCPClient(
+                base_url=settings.ariaops_mcp.url,
+                auth_token=settings.ariaops_mcp.auth_token.get_secret_value() or None,
+                timeout=settings.ariaops_mcp.timeout,
+            )
+
+        if settings.entrag_mcp.enabled:
+            self.entrag_client = EntragMCPClient(
+                base_url=settings.entrag_mcp.url,
+                auth_token=settings.entrag_mcp.auth_token.get_secret_value() or None,
+                timeout=settings.entrag_mcp.timeout,
+            )
 
         self.graph = create_agent_graph(
             collector_func=self._collect_infrastructure_state,
@@ -77,7 +99,8 @@ class VMwareAIOpsAgent:
             knowledge_base=self.knowledge_base,
             llm_engine=self.llm_engine,
             remediator_func=self._auto_remediate_wrapper,
-            search_tool=self.search_tool
+            entrag_client=self.entrag_client,
+            ariaops_client=self.ariaops_client,
         )
 
         self._scheduler: AsyncIOScheduler | None = None
@@ -89,11 +112,26 @@ class VMwareAIOpsAgent:
         logger.info("Starting VMware AI Ops Agent")
         await self.knowledge_base.initialize()
 
+        # Connect MCP clients
+        if self.ariaops_client:
+            try:
+                await self.ariaops_client.connect()
+                logger.info("AriaOps MCP client connected")
+            except Exception as e:
+                logger.error("Failed to connect AriaOps MCP client", error=str(e))
+                self.ariaops_client = None
+
+        if self.entrag_client:
+            try:
+                await self.entrag_client.connect()
+                logger.info("EntRAG MCP client connected")
+            except Exception as e:
+                logger.error("Failed to connect EntRAG MCP client", error=str(e))
+                self.entrag_client = None
+
         if self.settings.metrics.enabled:
-            # Note: prometheus_client's start_http_server returns None but starts a daemon thread
-            # The server cannot be cleanly stopped, but it will terminate with the process
             start_http_server(self.settings.metrics.port)
-            self._metrics_server = True  # Mark that server was started
+            self._metrics_server = True
             logger.info("Metrics server started", port=self.settings.metrics.port)
 
         self._scheduler = AsyncIOScheduler()
@@ -116,9 +154,17 @@ class VMwareAIOpsAgent:
         self.state.running = False
         if self._scheduler:
             self._scheduler.shutdown()
+
+        # Disconnect MCP clients
+        if self.ariaops_client:
+            await self.ariaops_client.disconnect()
+            logger.info("AriaOps MCP client disconnected")
+        if self.entrag_client:
+            await self.entrag_client.disconnect()
+            logger.info("EntRAG MCP client disconnected")
+
         # Flush any pending KB documents before shutdown
         await self.knowledge_base.flush()
-        # Note: Prometheus HTTP server runs as daemon thread and will stop with process
         if self._metrics_server:
             logger.info("Metrics server will terminate with process")
         logger.info("Agent stopped")
@@ -131,6 +177,7 @@ class VMwareAIOpsAgent:
             "analysis_result": None,
             "kb_results": None,
             "search_results": None,
+            "capacity_data": None,
             "remediation_status": None,
             "errors": [],
         }
@@ -164,16 +211,12 @@ class VMwareAIOpsAgent:
             if graph_result.get("analysis_result"):
                 analysis = graph_result["analysis_result"]
                 self.state.last_analysis = analysis
-                # Record analysis to KB
                 await self.knowledge_base.record_analysis(analysis)
-                # Handle notifications
                 await self._handle_analysis_results(analysis)
 
             if graph_result.get("remediation_status"):
-                 # Determine actions executed from result
-                 # For now, simplistic increment if executed
-                 if graph_result["remediation_status"].get("executed"):
-                     self.state.actions_executed += 1
+                if graph_result["remediation_status"].get("executed"):
+                    self.state.actions_executed += 1
 
             if graph_result.get("errors"):
                 for err in graph_result["errors"]:
@@ -199,15 +242,18 @@ class VMwareAIOpsAgent:
             logger.info("Analysis cycle complete", duration_seconds=duration)
 
     async def _collect_infrastructure_state(self) -> InfrastructureState:
+        """Collect infrastructure state via MCP client (preferred) or direct collector."""
         state = InfrastructureState()
 
-        async def collect_vrops():
-            try:
-                async with VROpsCollector(self.settings.vrops) as vrops:
-                    return await vrops.collect_all()
-            except Exception as e:
-                logger.error("vROps collection failed", error=str(e))
-                return [], [], [], []
+        async def collect_ariaops():
+            """Collect from AriaOps MCP server."""
+            if self.ariaops_client:
+                try:
+                    return await self.ariaops_client.collect_all()
+                except Exception as e:
+                    logger.error("AriaOps MCP collection failed", error=str(e))
+            # Fallback: return empty
+            return [], [], [], []
 
         async def collect_vrli():
             try:
@@ -217,9 +263,9 @@ class VMwareAIOpsAgent:
                 logger.error("vRLI collection failed", error=str(e))
                 return [], []
 
-        vrops_result, vrli_result = await asyncio.gather(collect_vrops(), collect_vrli())
+        ariaops_result, vrli_result = await asyncio.gather(collect_ariaops(), collect_vrli())
 
-        resources, alerts, recommendations, anomalies = vrops_result
+        resources, alerts, recommendations, anomalies = ariaops_result
         logs, log_anomalies = vrli_result
 
         state.resources = resources
@@ -232,13 +278,12 @@ class VMwareAIOpsAgent:
         logger.info(
             "Infrastructure state collected",
             resources=len(state.resources),
+            alerts=len(state.alerts),
             logs=len(state.recent_logs),
         )
         return state
 
-    async def _handle_analysis_results(
-        self, analysis: AnalysisResult
-    ) -> None:
+    async def _handle_analysis_results(self, analysis: AnalysisResult) -> None:
         if self._on_analysis_complete:
             self._on_analysis_complete(analysis)
 
@@ -267,7 +312,10 @@ class VMwareAIOpsAgent:
             async with VCenterClient(self.settings.vcenter) as vcenter:
                 async with NotificationService(self.settings.notifications) as notifications:
                     executor = ActionExecutor(
-                        self.settings.agent, vcenter=vcenter, notifications=notifications
+                        self.settings.agent,
+                        vcenter=vcenter,
+                        notifications=notifications,
+                        ariaops_client=self.ariaops_client,
                     )
                     result = await executor.execute_plan(
                         analysis.remediation_plan,
@@ -275,38 +323,27 @@ class VMwareAIOpsAgent:
                     )
 
                     success_count = sum(1 for r in result.action_results if r.success)
-                    # We can't update self.state.actions_executed safely here
-                    # if we want to be pure, but since this is a method on
-                    # the agent, it's fine. However, the graph logic handles
-                    # state update based on return.
-
 
                     return {
                         "executed": True,
                         "success_count": success_count,
                         "plan_id": analysis.remediation_plan.id,
-                        "results": [r.status.value for r in result.action_results]
+                        "results": [r.status.value for r in result.action_results],
                     }
         except Exception as e:
             logger.error("Auto-remediation failed", error=str(e))
             raise
 
     async def analyze_now(self) -> AnalysisResult | None:
-        """Trigger immediate analysis outside of scheduled cycle.
-
-        Note: This runs a full cycle but does not update cycle metrics.
-        For full cycle execution with metrics, use _run_cycle() directly.
-        """
+        """Trigger immediate analysis outside of scheduled cycle."""
         logger.info("Triggering immediate analysis")
         try:
             result = await self.graph.ainvoke(self._initial_graph_state())
 
             analysis = result.get("analysis_result")
 
-            # Update state with analysis result for consistency
             if analysis:
                 self.state.last_analysis = analysis
-                # Record to KB like _run_cycle does
                 await self.knowledge_base.record_analysis(analysis)
 
             if result.get("errors"):
@@ -331,6 +368,10 @@ class VMwareAIOpsAgent:
                 self.state.last_analysis.urgency.value if self.state.last_analysis else None
             ),
             "knowledge_base": self.knowledge_base.get_statistics(),
+            "mcp_clients": {
+                "ariaops": "connected" if self.ariaops_client else "disabled",
+                "entrag": "connected" if self.entrag_client else "disabled",
+            },
         }
 
     def get_last_analysis(self) -> AnalysisResult | None:

@@ -124,6 +124,45 @@ vrops:
         assert settings.agent.thresholds.cpu_warning == 80
         assert settings.agent.thresholds.memory_critical == 95
 
+    def test_mcp_config_defaults(self):
+        """MCP configuration should have sensible defaults."""
+        settings = Settings()
+
+        assert settings.ariaops_mcp.url == "http://localhost:8080/mcp"
+        assert settings.ariaops_mcp.enabled is True
+        assert settings.ariaops_mcp.timeout == 120.0
+
+        assert settings.entrag_mcp.url == "http://localhost:8081/mcp"
+        assert settings.entrag_mcp.enabled is True
+        assert settings.entrag_mcp.timeout == 60.0
+
+    def test_mcp_config_from_yaml(self):
+        """MCP configuration should load from YAML."""
+        yaml_content = """
+ariaops_mcp:
+  url: http://ariaops:8080/mcp
+  enabled: true
+  timeout: 90.0
+
+entrag_mcp:
+  url: http://entrag:8081/mcp
+  enabled: false
+  timeout: 45.0
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                settings = Settings.from_yaml(f.name)
+
+                assert settings.ariaops_mcp.url == "http://ariaops:8080/mcp"
+                assert settings.ariaops_mcp.timeout == 90.0
+                assert settings.entrag_mcp.enabled is False
+                assert settings.entrag_mcp.timeout == 45.0
+            finally:
+                os.unlink(f.name)
+
 
 class TestSecretHandling:
     """Test suite for secret/password handling."""

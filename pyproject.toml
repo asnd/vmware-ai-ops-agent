@@ -1,17 +1,17 @@
 [project]
 name = "vmware-ai-ops-agent"
-version = "1.0.0"
-description = "AI-powered proactive maintenance agent for VMware vROps and vRLI"
+version = "1.1.0"
+description = "AI-powered proactive maintenance agent for VMware Aria Operations and vRLI"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Security Research Team"}
 ]
-keywords = ["vmware", "vrops", "vrli", "ai", "ops", "monitoring", "llm"]
+keywords = ["vmware", "aria-operations", "vrli", "ai", "ops", "monitoring", "llm", "mcp"]
 
 dependencies = [
-    "httpx>=0.25.0",
+    "httpx>=0.27.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "openai>=1.0.0",
@@ -28,18 +28,20 @@ dependencies = [
     "langchain>=0.1.0",
     "langchain-openai>=0.0.5",
     "langchain-community>=0.0.10",
-    "duckduckgo-search>=4.0.0",
     "faiss-cpu>=1.7.4",
 ]
 
 [project.optional-dependencies]
+legacy = [
+    "duckduckgo-search>=4.0.0",
+]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
+    "ruff>=0.4.0",
     "mypy>=1.0.0",
+    "respx>=0.21.0",
 ]
 
 [project.scripts]
@@ -49,15 +51,20 @@ vmware-ai-agent = "vmware_ai_ops_agent.cli:app"
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.black]
-line-length = 100
-
 [tool.ruff]
 line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["UP042"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

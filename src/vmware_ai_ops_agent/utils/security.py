@@ -11,7 +11,10 @@ IPV4_PATTERN = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
 IPV6_PATTERN = r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b"
 
 # Regex for common secret patterns (simplified)
-SECRET_PATTERN = r'(?i)(api[_-]?key|secret|password|token|auth|credential|private[_-]?key)[\s:=]+[\'"]?[\w\-]+[\'"]?'
+SECRET_PATTERN = (
+    r"(?i)(api[_-]?key|secret|password|token|auth|credential|private[_-]?key)"
+    r'[\s:=]+[\'"]?[\w\-]+[\'"]?'
+)
 
 # Regex for email addresses
 EMAIL_PATTERN = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
@@ -23,7 +26,7 @@ UUID_PATTERN = r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 JWT_PATTERN = r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"
 
 # Regex for base64-encoded secrets (long base64 strings often are credentials)
-BASE64_SECRET_PATTERN = r'(?i)(bearer|basic|authorization)[\s:]+[A-Za-z0-9+/=]{40,}'
+BASE64_SECRET_PATTERN = r"(?i)(bearer|basic|authorization)[\s:]+[A-Za-z0-9+/=]{40,}"
 
 
 def scrub_sensitive_data(text: str) -> str:
