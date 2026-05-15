@@ -127,6 +127,24 @@ class MetricsConfig(BaseModel):
     path: str = "/metrics"
 
 
+class AriaOpsMCPConfig(BaseModel):
+    """Configuration for AriaOps MCP server connection."""
+
+    url: str = "http://localhost:8080/mcp"
+    auth_token: SecretStr = SecretStr("")
+    timeout: float = 120.0
+    enabled: bool = True
+
+
+class EntragMCPConfig(BaseModel):
+    """Configuration for EntRAG MCP server connection."""
+
+    url: str = "http://localhost:8081/mcp"
+    auth_token: SecretStr = SecretStr("")
+    timeout: float = 60.0
+    enabled: bool = True
+
+
 class KnowledgeBaseConfig(BaseModel):
     runbooks_dir: str = "./config/runbooks"
     kb_cache_dir: str = "./data/kb_cache"
@@ -148,6 +166,8 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
+    ariaops_mcp: AriaOpsMCPConfig = Field(default_factory=AriaOpsMCPConfig)
+    entrag_mcp: EntragMCPConfig = Field(default_factory=EntragMCPConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":

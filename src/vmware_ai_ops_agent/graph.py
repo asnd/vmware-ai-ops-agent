@@ -1,7 +1,12 @@
 """
 LangGraph definition for the VMware AI Ops Agent.
+
+Flow: collect → correlate → enrich (KB + capacity) → analyze → remediate
 """
 
+from __future__ import annotations
+
+import asyncio
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -9,18 +14,22 @@ from langgraph.graph import END, StateGraph
 from .analysis.models import AnalysisResult
 from .collectors.models import InfrastructureState
 from .correlation.engine import CorrelationResult
-from .tools.search import BroadcomKBSearch
+from .mcp_clients.ariaops import AriaOpsMCPClient
+from .mcp_clients.entrag import EntragMCPClient
 
 
 class AgentState(TypedDict):
     """State for the AI Ops Agent graph."""
+
     infrastructure_state: InfrastructureState | None
     correlation_result: CorrelationResult | None
     analysis_result: AnalysisResult | None
     kb_results: list[dict] | None
     search_results: list[dict] | None
+    capacity_data: list[dict] | None
     remediation_status: dict[str, Any] | None
     errors: list[str]
+
 
 def create_agent_graph(
     collector_func: Any,
@@ -28,10 +37,15 @@ def create_agent_graph(
     knowledge_base: Any,
     llm_engine: Any,
     remediator_func: Any,
-    search_tool: BroadcomKBSearch
+    entrag_client: EntragMCPClient | None = None,
+    ariaops_client: AriaOpsMCPClient | None = None,
 ):
     """
     Creates the LangGraph state machine.
+
+    The graph now uses MCP clients for data enrichment:
+    - entrag_client: KB article retrieval via EntRAG MCP server
+    - ariaops_client: Capacity forecasting via AriaOps MCP server
     """
 
     # --- Nodes ---
@@ -53,16 +67,15 @@ def create_agent_graph(
         except Exception as e:
             return {"errors": state.get("errors", []) + [f"Correlation failed: {str(e)}"]}
 
-    async def search_node(state: AgentState) -> dict:
+    async def enrich_node(state: AgentState) -> dict:
+        """Parallel enrichment: KB search via EntRAG + capacity forecast via AriaOps."""
         correlation_result = state.get("correlation_result")
         issues = correlation_result.issues if correlation_result else []
         if not issues:
             return {}
 
-        # Search for the first/most critical issue
+        # Build query from correlated issues
         primary_issue = issues[0]
-
-        # Build query safely with defensive attribute access
         query_parts = []
         try:
             pattern = getattr(primary_issue, "pattern", None)
@@ -79,15 +92,56 @@ def create_agent_graph(
 
         query = " ".join(query_parts) if query_parts else "VMware infrastructure issue"
 
-        kb_hits = []
-        if knowledge_base:
-            kb_hits = await knowledge_base.search_similar(query)
-            # Convert SimilarityResult to dict for state
-            kb_hits = [h.model_dump() for h in kb_hits]
+        # Run enrichment tasks in parallel
+        kb_hits: list[dict] = []
+        web_hits: list[dict] = []
+        capacity_data: list[dict] = []
 
-        web_hits = search_tool.search(query)
+        async def fetch_kb():
+            """Fetch KB articles from EntRAG MCP or fall back to local KB."""
+            nonlocal kb_hits, web_hits
+            try:
+                if entrag_client:
+                    web_hits = await entrag_client.search(query)
+                if knowledge_base:
+                    similar = await knowledge_base.search_similar(query)
+                    kb_hits = [h.model_dump() for h in similar]
+            except Exception:
+                # Don't fail the whole node, just log
+                kb_hits = []
+                web_hits = []
 
-        return {"kb_results": kb_hits, "search_results": web_hits}
+        async def fetch_capacity():
+            """Fetch capacity forecasts for affected resources."""
+            nonlocal capacity_data
+            if not ariaops_client:
+                return
+            try:
+                # Get capacity for resources mentioned in issues
+                affected_resources = set()
+                for issue in issues[:5]:  # Limit to top 5 issues
+                    resources = getattr(issue, "affected_resources", [])
+                    for res in resources:
+                        res_id = getattr(res, "id", None) or (res if isinstance(res, str) else None)
+                        if res_id:
+                            affected_resources.add(res_id)
+
+                for resource_id in list(affected_resources)[:3]:
+                    try:
+                        cap = await ariaops_client.get_capacity_remaining(resource_id)
+                        capacity_data.append(cap)
+                    except Exception:
+                        pass
+            except Exception:
+                capacity_data = []
+
+        await asyncio.gather(fetch_kb(), fetch_capacity())
+
+        return {
+            "kb_results": kb_hits,
+            "search_results": web_hits,
+            "capacity_data": capacity_data,
+        }
 
     async def analyze_node(state: AgentState) -> dict:
         if not state.get("infrastructure_state"):
@@ -99,7 +153,6 @@ def create_agent_graph(
         if state.get("kb_results"):
             context_parts.append("### Similar Past Incidents:")
             for hit in state["kb_results"]:
-                # SimilarityResult.model_dump() has `content` and nested `metadata`
                 meta = hit.get("metadata", {})
                 summary = meta.get("summary") or hit.get("content", "No content")
                 context_parts.append(f"- {summary} (Score: {hit.get('similarity_score', 0):.2f})")
@@ -110,15 +163,34 @@ def create_agent_graph(
         if state.get("search_results"):
             context_parts.append("\n### Knowledge Base Articles:")
             for hit in state["search_results"]:
-                context_parts.append(f"- [{hit.get('title')}]({hit.get('link')})")
-                context_parts.append(f"  Snippet: {hit.get('snippet', '')[:200]}...")
+                title = hit.get("title", "Untitled")
+                link = hit.get("link", "")
+                section = hit.get("section_type", "")
+                context_parts.append(f"- [{title}]({link})")
+                snippet = hit.get("snippet", "")[:300]
+                if snippet:
+                    context_parts.append(f"  {snippet}...")
+                if section:
+                    context_parts.append(f"  Section: {section}")
+
+        if state.get("capacity_data"):
+            context_parts.append("\n### Capacity Analysis:")
+            for cap in state["capacity_data"]:
+                if isinstance(cap, dict):
+                    resource_name = cap.get("resource_name", cap.get("resourceName", "Unknown"))
+                    remaining = cap.get("remaining_capacity", cap.get("remainingCapacity", "N/A"))
+                    time_remaining = cap.get("time_remaining", cap.get("timeRemaining", "N/A"))
+                    context_parts.append(
+                        f"- {resource_name}: {remaining}% remaining, "
+                        f"~{time_remaining} days until exhaustion"
+                    )
 
         context_str = "\n".join(context_parts)
 
         try:
             analysis = await llm_engine.analyze_infrastructure(
                 state["infrastructure_state"],
-                context=context_str
+                context=context_str,
             )
             return {"analysis_result": analysis}
         except Exception as e:
@@ -137,12 +209,12 @@ def create_agent_graph(
 
     # --- Conditional Logic ---
 
-    def should_analyze(state: AgentState) -> str:
+    def should_enrich(state: AgentState) -> str:
         if state.get("errors"):
             return END
         correlation_result = state.get("correlation_result")
         if correlation_result and correlation_result.issues:
-            return "search"
+            return "enrich"
         return END
 
     def should_remediate(state: AgentState) -> str:
@@ -159,15 +231,15 @@ def create_agent_graph(
 
     workflow.add_node("collect", collect_node)
     workflow.add_node("correlate", correlate_node)
-    workflow.add_node("search", search_node)
+    workflow.add_node("enrich", enrich_node)
     workflow.add_node("analyze", analyze_node)
     workflow.add_node("remediate", remediate_node)
 
     workflow.set_entry_point("collect")
 
     workflow.add_edge("collect", "correlate")
-    workflow.add_conditional_edges("correlate", should_analyze)
-    workflow.add_edge("search", "analyze")
+    workflow.add_conditional_edges("correlate", should_enrich)
+    workflow.add_edge("enrich", "analyze")
     workflow.add_conditional_edges("analyze", should_remediate)
     workflow.add_edge("remediate", END)
 

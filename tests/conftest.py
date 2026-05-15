@@ -19,6 +19,8 @@ from vmware_ai_ops_agent.collectors.models import (
 )
 from vmware_ai_ops_agent.config import (
     AgentConfig,
+    AriaOpsMCPConfig,
+    EntragMCPConfig,
     KnowledgeBaseConfig,
     LLMConfig,
     LoggingConfig,
@@ -52,6 +54,14 @@ def test_settings() -> Settings:
         logging=LoggingConfig(level="DEBUG"),
         knowledge_base=KnowledgeBaseConfig(
             runbooks_dir="/tmp/runbooks", kb_cache_dir="/tmp/kb_cache"
+        ),
+        ariaops_mcp=AriaOpsMCPConfig(
+            url="http://localhost:8080/mcp",
+            enabled=False,
+        ),
+        entrag_mcp=EntragMCPConfig(
+            url="http://localhost:8081/mcp",
+            enabled=False,
         ),
     )
 
@@ -157,3 +167,50 @@ def mock_llm_engine():
         )
     )
     return engine
+
+
+@pytest.fixture
+def mock_ariaops_mcp_client():
+    """Create a mock AriaOps MCP client."""
+    client = AsyncMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.collect_all = AsyncMock(return_value=([], [], [], []))
+    client.list_alerts = AsyncMock(return_value=[])
+    client.list_resources = AsyncMock(return_value=[])
+    client.get_capacity_remaining = AsyncMock(
+        return_value={"remaining_capacity": 50.0, "time_remaining": 90}
+    )
+    client.mark_resources_maintained = AsyncMock(return_value={"status": "success"})
+    return client
+
+
+@pytest.fixture
+def mock_entrag_mcp_client():
+    """Create a mock EntRAG MCP client."""
+    client = AsyncMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.search = AsyncMock(
+        return_value=[
+            {
+                "title": "KB Test Article",
+                "link": "https://kb.broadcom.com/test",
+                "snippet": "Test content",
+                "section_type": "resolution",
+                "score": "0.8",
+            }
+        ]
+    )
+    client.search_kb = AsyncMock(
+        return_value=[
+            {
+                "title": "KB Test Article",
+                "url": "https://kb.broadcom.com/test",
+                "content": "Test content",
+                "section_type": "resolution",
+                "relevance_score": 0.8,
+            }
+        ]
+    )
+    return client

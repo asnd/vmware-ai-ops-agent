@@ -1,6 +1,11 @@
 """
 Action executor for remediation plans.
+
+Supports AriaOps MCP write operations for maintenance mode and
+alert management when ariaops_client is provided.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -75,10 +80,12 @@ class ActionExecutor:
         agent_config: AgentConfig,
         vcenter: VCenterClient | None = None,
         notifications: NotificationService | None = None,
+        ariaops_client: Any = None,
     ):
         self.config = agent_config
         self.vcenter = vcenter
         self.notifications = notifications
+        self.ariaops_client = ariaops_client
         self._action_count_hour = 0
         self._hour_start = datetime.utcnow()
 
@@ -86,6 +93,7 @@ class ActionExecutor:
             ActionType.VMOTION: self._execute_vmotion,
             ActionType.STORAGE_VMOTION: self._execute_storage_vmotion,
             ActionType.DRS_REBALANCE: self._execute_drs_rebalance,
+            ActionType.HOST_MAINTENANCE: self._execute_host_maintenance,
             ActionType.NOTIFY: self._execute_notify,
             ActionType.INVESTIGATE: self._execute_investigate,
         }
@@ -111,7 +119,10 @@ class ActionExecutor:
     def _requires_human_approval(self, step: RemediationStep) -> bool:
         if step.requires_approval:
             return True
-        return self.config.auto_remediate.require_approval and step.action_type not in self.SAFE_ACTIONS
+        return (
+            self.config.auto_remediate.require_approval
+            and step.action_type not in self.SAFE_ACTIONS
+        )
 
     async def execute_plan(
         self,
@@ -271,3 +282,31 @@ class ActionExecutor:
     async def _execute_investigate(self, step: RemediationStep, dry_run: bool) -> dict[str, Any]:
         logger.info("Investigation required", description=step.description)
         return {"action": "investigate", "description": step.description}
+
+    async def _execute_host_maintenance(
+        self, step: RemediationStep, dry_run: bool
+    ) -> dict[str, Any]:
+        """Put a host into maintenance mode via AriaOps MCP."""
+        resource_id = step.target_resource
+        if not resource_id:
+            raise ValueError("Missing target resource for maintenance mode")
+
+        duration = step.parameters.get("duration_minutes", 60)
+
+        if dry_run:
+            logger.info(
+                "DRY RUN: Would mark resource as maintained",
+                resource_id=resource_id,
+                duration=duration,
+            )
+            return {"dry_run": True, "action": "host_maintenance", "resource_id": resource_id}
+
+        if not self.ariaops_client:
+            raise RuntimeError("AriaOps MCP client not configured for maintenance operations")
+
+        result = await self.ariaops_client.mark_resources_maintained(
+            resource_ids=[resource_id],
+            duration_minutes=duration,
+        )
+        logger.info("Resource marked as maintained", resource_id=resource_id, result=result)
+        return {"action": "host_maintenance", "resource_id": resource_id, "result": result}

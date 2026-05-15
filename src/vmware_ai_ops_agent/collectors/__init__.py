@@ -1,5 +1,8 @@
 """
 Data collectors for VMware infrastructure.
+
+The VROpsCollector is retained for backward compatibility but the preferred
+data path is via the AriaOpsMCPClient in mcp_clients/.
 """
 
 from .models import (

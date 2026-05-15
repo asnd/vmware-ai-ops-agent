@@ -211,8 +211,7 @@ class VRLICollector:
                             resource=None,
                             anomaly_type="log_pattern",
                             description=(
-                                f"Critical pattern '{pattern_name}' detected: "
-                                f"{entry.text[:200]}"
+                                f"Critical pattern '{pattern_name}' detected: {entry.text[:200]}"
                             ),
                             severity=severity,
                             confidence=0.9,
