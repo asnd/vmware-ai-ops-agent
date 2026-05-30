@@ -1,18 +1,17 @@
 """
 MCP client for AriaOps (VMware Aria Operations) via ariaops_mcp server.
 
-Replaces the direct VROpsCollector with MCP protocol-based communication,
-gaining circuit breaker, token lifecycle, retry, and 54 well-typed tools.
+Replaces the direct VROpsCollector with MCP protocol-based communication.
+Inherits session lifecycle, SSE response handling, and transport-level retry
+from BaseMCPClient.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 from typing import Any
 
-import httpx
 import structlog
 
 from ..collectors.models import (
@@ -26,12 +25,12 @@ from ..collectors.models import (
     Severity,
     Symptom,
 )
+from .base import BaseMCPClient
 
 logger = structlog.get_logger(__name__)
 
 
 def _safe_resource_kind(value: str) -> ResourceKind:
-    """Safely convert string to ResourceKind."""
     try:
         return ResourceKind(value)
     except ValueError:
@@ -39,7 +38,6 @@ def _safe_resource_kind(value: str) -> ResourceKind:
 
 
 def _safe_severity(value: str) -> Severity:
-    """Safely convert string to Severity."""
     mapping = {
         "CRITICAL": Severity.CRITICAL,
         "IMMEDIATE": Severity.IMMEDIATE,
@@ -51,7 +49,6 @@ def _safe_severity(value: str) -> Severity:
 
 
 def _safe_timestamp(epoch_ms: int | None) -> datetime:
-    """Safely convert epoch milliseconds to datetime."""
     if epoch_ms is None or epoch_ms == 0:
         return datetime.utcnow()
     try:
@@ -60,11 +57,11 @@ def _safe_timestamp(epoch_ms: int | None) -> datetime:
         return datetime.utcnow()
 
 
-class AriaOpsMCPClient:
+class AriaOpsMCPClient(BaseMCPClient):
     """MCP client adapter for ariaops_mcp server.
 
-    Communicates via MCP Streamable HTTP transport. Each tool call
-    is a JSON-RPC request to the MCP server endpoint.
+    Communicates via MCP Streamable HTTP transport. Inherits session
+    lifecycle, SSE/JSON response parsing, and retry from BaseMCPClient.
     """
 
     def __init__(
@@ -73,109 +70,7 @@ class AriaOpsMCPClient:
         auth_token: str | None = None,
         timeout: float = 120.0,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.auth_token = auth_token
-        self.timeout = timeout
-        self._client: httpx.AsyncClient | None = None
-        self._session_id: str | None = None
-
-    async def connect(self) -> None:
-        """Initialize HTTP client and establish MCP session."""
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.auth_token:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
-
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers=headers,
-            timeout=self.timeout,
-        )
-
-        # Initialize MCP session
-        init_request = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "vmware-ai-ops-agent", "version": "1.0.0"},
-            },
-        }
-        response = await self._client.post("/mcp", json=init_request)
-        response.raise_for_status()
-        result = response.json()
-
-        # Store session ID from response header if present
-        self._session_id = response.headers.get("mcp-session-id")
-
-        # Send initialized notification
-        initialized_notification = {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {},
-        }
-        headers = {}
-        if self._session_id:
-            headers["mcp-session-id"] = self._session_id
-        await self._client.post("/mcp", json=initialized_notification, headers=headers)
-
-        logger.info(
-            "AriaOps MCP client connected",
-            server_name=result.get("result", {}).get("serverInfo", {}).get("name", "unknown"),
-        )
-
-    async def disconnect(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-        self._session_id = None
-
-    async def __aenter__(self) -> AriaOpsMCPClient:
-        await self.connect()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        await self.disconnect()
-
-    async def _call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> Any:
-        """Call an MCP tool and return the parsed result."""
-        if not self._client:
-            raise RuntimeError("Client not connected. Call connect() first.")
-
-        request = {
-            "jsonrpc": "2.0",
-            "id": id(asyncio.current_task()) or 1,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments or {}},
-        }
-
-        headers = {}
-        if self._session_id:
-            headers["mcp-session-id"] = self._session_id
-
-        response = await self._client.post("/mcp", json=request, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-
-        if "error" in result:
-            error = result["error"]
-            raise RuntimeError(f"MCP tool error: {error.get('message', 'Unknown error')}")
-
-        # Extract content from MCP result
-        content = result.get("result", {}).get("content", [])
-        if not content:
-            return {}
-
-        # Parse first text content block
-        for block in content:
-            if block.get("type") == "text":
-                try:
-                    return json.loads(block["text"])
-                except (json.JSONDecodeError, KeyError):
-                    return {"raw_text": block.get("text", "")}
-        return {}
+        super().__init__(base_url=base_url, auth_token=auth_token, timeout=timeout)
 
     # --- Resource Tools ---
 
@@ -340,20 +235,15 @@ class AriaOpsMCPClient:
         self,
         resource_kinds: list[str] | None = None,
     ) -> tuple[list[ResourceHealth], list[Alert], list[Recommendation], list[Anomaly]]:
-        """Collect full infrastructure state via MCP tools.
-
-        This replaces VROpsCollector.collect_all() by calling ariaops_mcp tools.
-        """
+        """Collect full infrastructure state via MCP tools."""
         if resource_kinds is None:
             resource_kinds = ["VirtualMachine", "HostSystem", "Datastore", "ClusterComputeResource"]
 
-        # Fetch resources, alerts in parallel
         resource_tasks = [self.list_resources(resource_kind=kind) for kind in resource_kinds]
         alerts_task = self.list_alerts(status="ACTIVE")
 
         all_results = await asyncio.gather(*resource_tasks, alerts_task, return_exceptions=True)
 
-        # Process resources
         resource_lists = all_results[: len(resource_kinds)]
         alerts_raw = all_results[-1] if not isinstance(all_results[-1], Exception) else []
 
@@ -367,7 +257,6 @@ class AriaOpsMCPClient:
                 if resource:
                     all_resources.append(resource)
 
-        # Process alerts
         alerts: list[Alert] = []
         if isinstance(alerts_raw, list):
             for item in alerts_raw:
@@ -383,7 +272,6 @@ class AriaOpsMCPClient:
         return all_resources, alerts, [], []
 
     def _parse_resource_health(self, data: dict[str, Any]) -> ResourceHealth | None:
-        """Parse raw MCP resource data into ResourceHealth model."""
         try:
             resource_key = data.get("resourceKey", data)
             resource = ResourceIdentifier(
@@ -415,7 +303,6 @@ class AriaOpsMCPClient:
             return None
 
     def _parse_alert(self, data: dict[str, Any]) -> Alert | None:
-        """Parse raw MCP alert data into Alert model."""
         try:
             resource_data = data.get("resource", {})
             resource_key = resource_data.get("resourceKey", resource_data)

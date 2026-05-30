@@ -210,7 +210,7 @@ def create_agent_graph(
     # --- Conditional Logic ---
 
     def should_enrich(state: AgentState) -> str:
-        if state.get("errors"):
+        if not state.get("infrastructure_state"):
             return END
         correlation_result = state.get("correlation_result")
         if correlation_result and correlation_result.issues:
