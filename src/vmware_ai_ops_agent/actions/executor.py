@@ -7,9 +7,10 @@ alert management when ariaops_client is provided.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -29,6 +30,13 @@ class ExecutionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+@dataclass
+class RecentAction:
+    action_type: ActionType
+    target_resource: str | None
+    executed_at: datetime
 
 
 @dataclass
@@ -69,11 +77,18 @@ class ActionExecutor:
     Approval can be enforced globally (for non-safe actions) via
     auto_remediate.require_approval, or explicitly per-step using
     RemediationStep.requires_approval.
+
+    Supports deduplication: actions with the same (action_type, target_resource)
+    within DEDUP_WINDOW_MINUTES are skipped to prevent repeated remediation
+    across consecutive analysis cycles.
     """
 
     # Actions that are safe to execute without human confirmation
     # Only logging/notification actions are considered safe
     SAFE_ACTIONS = frozenset({ActionType.NOTIFY, ActionType.INVESTIGATE})
+
+    # Time window for deduplicating identical actions
+    DEDUP_WINDOW_MINUTES: int = 30
 
     def __init__(
         self,
@@ -88,6 +103,7 @@ class ActionExecutor:
         self.ariaops_client = ariaops_client
         self._action_count_hour = 0
         self._hour_start = datetime.utcnow()
+        self._recent_actions: deque[RecentAction] = deque(maxlen=200)
 
         self._handlers: dict[ActionType, Callable] = {
             ActionType.VMOTION: self._execute_vmotion,
@@ -115,6 +131,18 @@ class ActionExecutor:
         if self.config.auto_remediate.allowed_actions:
             return action_type.value in self.config.auto_remediate.allowed_actions
         return True
+
+    def _is_duplicate(self, step: RemediationStep) -> bool:
+        """Check if this exact action was already executed within the dedup window."""
+        cutoff = datetime.utcnow() - timedelta(minutes=self.DEDUP_WINDOW_MINUTES)
+        for recent in self._recent_actions:
+            if (
+                recent.action_type == step.action_type
+                and recent.target_resource == step.target_resource
+                and recent.executed_at > cutoff
+            ):
+                return True
+        return False
 
     def _requires_human_approval(self, step: RemediationStep) -> bool:
         if step.requires_approval:
@@ -155,6 +183,22 @@ class ActionExecutor:
                 if not self._is_action_allowed(step.action_type):
                     result.action_results.append(
                         ActionResult(step=step, status=ExecutionStatus.SKIPPED, error="Not allowed")
+                    )
+                    continue
+
+                if self._is_duplicate(step):
+                    logger.info(
+                        "Skipping duplicate action within dedup window",
+                        action=step.action_type.value,
+                        target=step.target_resource,
+                        window_minutes=self.DEDUP_WINDOW_MINUTES,
+                    )
+                    result.action_results.append(
+                        ActionResult(
+                            step=step,
+                            status=ExecutionStatus.SKIPPED,
+                            error=f"Duplicate action within {self.DEDUP_WINDOW_MINUTES}min window",
+                        )
                     )
                     continue
 
@@ -204,6 +248,13 @@ class ActionExecutor:
 
                 if action_result.success:
                     self._action_count_hour += 1
+                    self._recent_actions.append(
+                        RecentAction(
+                            action_type=step.action_type,
+                            target_resource=step.target_resource,
+                            executed_at=datetime.utcnow(),
+                        )
+                    )
 
                 # Non-safe actions failing should stop the plan
                 if not action_result.success and requires_human_approval:

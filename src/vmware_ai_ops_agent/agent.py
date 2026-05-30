@@ -73,6 +73,7 @@ class VMwareAIOpsAgent:
             settings.vector_db,
             settings.knowledge_base,
             api_key=settings.llm.api_key.get_secret_value(),
+            signing_secret=settings.knowledge_base.signing_secret.get_secret_value(),
         )
 
         # MCP Clients
@@ -92,6 +93,10 @@ class VMwareAIOpsAgent:
                 auth_token=settings.entrag_mcp.auth_token.get_secret_value() or None,
                 timeout=settings.entrag_mcp.timeout,
             )
+
+        # Executor is created once so rate-limit and dedup state survive across cycles.
+        # vcenter/notifications are injected per-call inside _auto_remediate.
+        self._executor: ActionExecutor | None = None
 
         self.graph = create_agent_graph(
             collector_func=self._collect_infrastructure_state,
@@ -128,6 +133,12 @@ class VMwareAIOpsAgent:
             except Exception as e:
                 logger.error("Failed to connect EntRAG MCP client", error=str(e))
                 self.entrag_client = None
+
+        # Create executor after MCP clients are resolved so ariaops_client is final.
+        self._executor = ActionExecutor(
+            self.settings.agent,
+            ariaops_client=self.ariaops_client,
+        )
 
         if self.settings.metrics.enabled:
             start_http_server(self.settings.metrics.port)
@@ -263,7 +274,15 @@ class VMwareAIOpsAgent:
                 logger.error("vRLI collection failed", error=str(e))
                 return [], []
 
-        ariaops_result, vrli_result = await asyncio.gather(collect_ariaops(), collect_vrli())
+        try:
+            ariaops_result, vrli_result = await asyncio.wait_for(
+                asyncio.gather(collect_ariaops(), collect_vrli()),
+                timeout=120.0,
+            )
+        except TimeoutError:
+            logger.error("Infrastructure collection timed out after 120s")
+            ariaops_result = ([], [], [], [])
+            vrli_result = ([], [])
 
         resources, alerts, recommendations, anomalies = ariaops_result
         logs, log_anomalies = vrli_result
@@ -306,21 +325,26 @@ class VMwareAIOpsAgent:
         if not analysis.remediation_plan or not analysis.remediation_plan.auto_executable:
             return None
 
+        if self._executor is None:
+            logger.error("Executor not initialised — call start() before remediating")
+            return None
+
         logger.info("Executing auto-remediation", plan_id=analysis.remediation_plan.id)
 
         try:
             async with VCenterClient(self.settings.vcenter) as vcenter:
                 async with NotificationService(self.settings.notifications) as notifications:
-                    executor = ActionExecutor(
-                        self.settings.agent,
-                        vcenter=vcenter,
-                        notifications=notifications,
-                        ariaops_client=self.ariaops_client,
-                    )
-                    result = await executor.execute_plan(
-                        analysis.remediation_plan,
-                        approval_callback=self._approval_callback,
-                    )
+                    # Inject per-call clients; the executor's rate-limit/dedup state persists.
+                    self._executor.vcenter = vcenter
+                    self._executor.notifications = notifications
+                    try:
+                        result = await self._executor.execute_plan(
+                            analysis.remediation_plan,
+                            approval_callback=self._approval_callback,
+                        )
+                    finally:
+                        self._executor.vcenter = None
+                        self._executor.notifications = None
 
                     success_count = sum(1 for r in result.action_results if r.success)
 

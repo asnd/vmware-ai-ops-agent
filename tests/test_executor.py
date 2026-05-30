@@ -230,6 +230,76 @@ class TestActionExecutor:
         assert result.action_results[0].status == ExecutionStatus.COMPLETED
 
 
+class TestExecutorCrossCycleState:
+    """Verify that rate-limit and dedup state survive across execute_plan calls (A1 fix)."""
+
+    @pytest.fixture
+    def shared_executor(self) -> ActionExecutor:
+        config = AgentConfig(
+            auto_remediate=AutoRemediateConfig(
+                enabled=True,
+                require_approval=False,
+                max_actions_per_hour=5,
+                allowed_actions=["notify", "investigate"],
+                forbidden_actions=[],
+            )
+        )
+        return ActionExecutor(config)
+
+    def _notify_plan(self, plan_id: str, target: str = "vm-001") -> RemediationPlan:
+        return RemediationPlan(
+            id=plan_id,
+            title="Notify Plan",
+            description="",
+            urgency=Urgency.LOW,
+            auto_executable=True,
+            steps=[
+                RemediationStep(
+                    order=1,
+                    action_type=ActionType.NOTIFY,
+                    description="Notify",
+                    target_resource=target,
+                    requires_approval=False,
+                    estimated_duration="1s",
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_accumulates_across_plans(self, shared_executor: ActionExecutor):
+        """Actions counted across multiple execute_plan calls should hit the hourly cap."""
+        shared_executor.config.auto_remediate.max_actions_per_hour = 3
+
+        completed_total = 0
+        for i in range(5):
+            result = await shared_executor.execute_plan(self._notify_plan(f"plan-{i}"))
+            completed_total += sum(1 for r in result.action_results if r.success)
+
+        assert completed_total <= 3, "Hourly rate limit must persist across execute_plan calls"
+
+    @pytest.mark.asyncio
+    async def test_dedup_skips_same_action_across_plans(self, shared_executor: ActionExecutor):
+        """The same (action_type, target_resource) within the dedup window must be skipped
+        even when submitted via a separate execute_plan call (i.e., a separate cycle)."""
+        # First call — action should succeed
+        result1 = await shared_executor.execute_plan(self._notify_plan("plan-A", target="vm-dedup"))
+        assert result1.action_results[0].success is True
+
+        # Immediately second call with identical action — should be deduplicated
+        result2 = await shared_executor.execute_plan(self._notify_plan("plan-B", target="vm-dedup"))
+        assert result2.action_results[0].status == ExecutionStatus.SKIPPED
+        assert "Duplicate" in (result2.action_results[0].error or "")
+
+    @pytest.mark.asyncio
+    async def test_different_targets_not_deduped(self, shared_executor: ActionExecutor):
+        """Actions on different targets must not be conflated by the dedup check."""
+        result1 = await shared_executor.execute_plan(self._notify_plan("plan-X", target="vm-001"))
+        result2 = await shared_executor.execute_plan(self._notify_plan("plan-Y", target="vm-002"))
+
+        assert result1.action_results[0].success is True
+        assert result2.action_results[0].success is True
+
+
 class TestActionResult:
     """Test suite for ActionResult."""
 

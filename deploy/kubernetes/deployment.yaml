@@ -56,8 +56,8 @@ data:
       temperature: 0.1
 
     vector_db:
-      type: chromadb
-      persist_directory: /app/data/chromadb
+      type: faiss
+      persist_directory: /app/data/faiss
       collection_name: vmware_incidents
 
     agent:

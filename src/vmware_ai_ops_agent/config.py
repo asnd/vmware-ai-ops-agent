@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -149,6 +149,7 @@ class KnowledgeBaseConfig(BaseModel):
     runbooks_dir: str = "./config/runbooks"
     kb_cache_dir: str = "./data/kb_cache"
     history_retention: int = 90
+    signing_secret: SecretStr = SecretStr("")
 
 
 class Settings(BaseSettings):
@@ -168,6 +169,23 @@ class Settings(BaseSettings):
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
     ariaops_mcp: AriaOpsMCPConfig = Field(default_factory=AriaOpsMCPConfig)
     entrag_mcp: EntragMCPConfig = Field(default_factory=EntragMCPConfig)
+
+    @model_validator(mode="after")
+    def _validate_required_secrets(self) -> "Settings":
+        checks = [
+            (self.vrops.host, "vrops.example.com", self.vrops.password, "VROPS_PASSWORD"),
+            (self.vrli.host, "vrli.example.com", self.vrli.password, "VRLI_PASSWORD"),
+            (self.vcenter.host, "vcenter.example.com", self.vcenter.password, "VCENTER_PASSWORD"),
+            (self.llm.endpoint, "http://localhost:8000/v1", self.llm.api_key, "LLM_API_KEY"),
+        ]
+        for host, default_host, secret, env_name in checks:
+            if host != default_host and not secret.get_secret_value():
+                raise ValueError(
+                    f"{env_name} is required when {host.split('.')[0] if '.' in host else host} "
+                    f"is set to a non-default host ('{host}'). "
+                    f"Set the {env_name} environment variable."
+                )
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":
