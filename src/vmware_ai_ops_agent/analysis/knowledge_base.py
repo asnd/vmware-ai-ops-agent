@@ -271,9 +271,7 @@ class KnowledgeBase:
             embeddings = self._embeddings
 
             if self._db is None:
-                self._db = await asyncio.to_thread(
-                    lambda: FAISS.from_documents(docs, embeddings)
-                )
+                self._db = await asyncio.to_thread(lambda: FAISS.from_documents(docs, embeddings))
             else:
                 db = self._db
                 await asyncio.to_thread(lambda: db.add_documents(docs))

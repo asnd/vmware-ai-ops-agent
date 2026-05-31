@@ -17,7 +17,7 @@ This project skeleton has been created. The full implementation is available in 
 ### Analysis
 - [ ] `src/vmware_ai_ops_agent/analysis/models.py` - Analysis data models
 - [ ] `src/vmware_ai_ops_agent/analysis/llm_engine.py` - LLM integration
-- [ ] `src/vmware_ai_ops_agent/analysis/knowledge_base.py` - ChromaDB integration
+- [ ] `src/vmware_ai_ops_agent/analysis/knowledge_base.py` - FAISS integration
 
 ### Correlation
 - [ ] `src/vmware_ai_ops_agent/correlation/engine.py` - Correlation logic

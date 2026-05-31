@@ -209,6 +209,87 @@ def status(
 
 
 @app.command()
+def capacity(
+    config: Annotated[
+        Path | None, typer.Option("--config", "-c", help="Configuration file path")
+    ] = None,
+    resource_kind: Annotated[
+        str, typer.Option("--kind", "-k", help="Resource kind to report on")
+    ] = "HostSystem",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max resources to report")] = 20,
+    out_format: Annotated[
+        str, typer.Option("--format", "-f", help="Output format (text, json)")
+    ] = "text",
+) -> None:
+    """Report capacity remaining and time-to-exhaustion for resources."""
+    setup_logging("WARNING")
+
+    try:
+        settings = load_settings(config)
+
+        if not settings.ariaops_mcp.enabled:
+            console.print(
+                "[red]AriaOps MCP is disabled[/red] — enable [bold]ariaops_mcp[/bold] to "
+                "run capacity reports."
+            )
+            raise typer.Exit(1)
+
+        from .mcp_clients.ariaops import AriaOpsMCPClient
+        from .reporting import build_capacity_report
+
+        async def run_report():
+            client = AriaOpsMCPClient(
+                base_url=settings.ariaops_mcp.url,
+                auth_token=settings.ariaops_mcp.auth_token.get_secret_value() or None,
+                timeout=settings.ariaops_mcp.timeout,
+            )
+            await client.connect()
+            try:
+                return await build_capacity_report(client, resource_kind, limit)
+            finally:
+                await client.disconnect()
+
+        console.print(f"[bold]Capacity report for {resource_kind} (top {limit})...[/bold]")
+        entries = asyncio.run(run_report())
+
+        if out_format == "json":
+            data = [
+                {
+                    "resource_id": e.resource_id,
+                    "resource_name": e.resource_name,
+                    "remaining_percent": e.remaining_percent,
+                    "time_remaining_days": e.time_remaining_days,
+                }
+                for e in entries
+            ]
+            console.print_json(data=data)
+            return
+
+        if not entries:
+            console.print("[yellow]No capacity data returned[/yellow]")
+            return
+
+        table = Table(title=f"Capacity — {resource_kind}")
+        table.add_column("Resource", style="cyan")
+        table.add_column("Remaining %", style="white", justify="right")
+        table.add_column("Days to exhaustion", style="white", justify="right")
+
+        for e in entries:
+            remaining = f"{e.remaining_percent:.0f}" if e.remaining_percent is not None else "N/A"
+            days = f"{e.time_remaining_days:.0f}" if e.time_remaining_days is not None else "N/A"
+            soon = e.time_remaining_days is not None and e.time_remaining_days < 30
+            table.add_row(e.resource_name, remaining, days, style="red" if soon else None)
+
+        console.print(table)
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Capacity report failed:[/red] {e}")
+        raise typer.Exit(1) from e
+
+
+@app.command()
 def validate(
     config: Annotated[
         Path | None, typer.Option("--config", "-c", help="Configuration file path")

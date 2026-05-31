@@ -5,8 +5,15 @@ Pattern definitions for infrastructure issue detection.
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any
+
+import structlog
+import yaml
 
 from ..collectors.models import Alert, LogEntry, ResourceHealth, Severity
+
+logger = structlog.get_logger(__name__)
 
 
 class PatternCategory(str, Enum):
@@ -157,6 +164,68 @@ KNOWN_PATTERNS: list[KnownPattern] = [
         auto_remediate=True,
     ),
 ]
+
+
+def _pattern_from_dict(data: dict[str, Any]) -> KnownPattern:
+    """Build a KnownPattern from a config dict (e.g. parsed YAML).
+
+    Accepts case-insensitive ``category``/``severity`` strings and
+    ``metric_conditions`` whose values are ``[operator, threshold]`` pairs.
+    """
+    if "id" not in data or "name" not in data:
+        raise ValueError("Custom pattern requires 'id' and 'name'")
+
+    category = PatternCategory(str(data.get("category", "compute")).lower())
+    severity = Severity(str(data.get("severity", "WARNING")).upper())
+
+    metric_conditions: dict[str, tuple[str, float]] = {}
+    for key, cond in (data.get("metric_conditions") or {}).items():
+        operator, threshold = cond
+        metric_conditions[key] = (str(operator), float(threshold))
+
+    return KnownPattern(
+        id=str(data["id"]),
+        name=str(data["name"]),
+        category=category,
+        description=str(data.get("description", "")),
+        severity=severity,
+        log_patterns=list(data.get("log_patterns", [])),
+        metric_conditions=metric_conditions,
+        alert_names=list(data.get("alert_names", [])),
+        predicted_failure=str(data.get("predicted_failure", "")),
+        failure_probability=float(data.get("failure_probability", 0.5)),
+        recommended_actions=list(data.get("recommended_actions", [])),
+        auto_remediate=bool(data.get("auto_remediate", False)),
+    )
+
+
+def load_custom_patterns(path: str | Path) -> list[KnownPattern]:
+    """Load extra patterns from a YAML file.
+
+    The file may be either a top-level list of patterns or a mapping with a
+    ``patterns:`` key. Invalid entries are skipped with a warning rather than
+    aborting startup. Returns an empty list if the file does not exist.
+    """
+    p = Path(path)
+    if not p.exists():
+        logger.warning("Custom patterns file not found", path=str(p))
+        return []
+
+    raw = yaml.safe_load(p.read_text()) or []
+    items = raw.get("patterns", []) if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        logger.warning("Custom patterns file has no pattern list", path=str(p))
+        return []
+
+    patterns: list[KnownPattern] = []
+    for item in items:
+        try:
+            patterns.append(_pattern_from_dict(item))
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning("Skipping invalid custom pattern", error=str(e), entry=str(item)[:200])
+
+    logger.info("Loaded custom patterns", count=len(patterns), path=str(p))
+    return patterns
 
 
 class PatternMatcher:
