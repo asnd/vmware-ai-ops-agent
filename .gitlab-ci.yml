@@ -15,10 +15,10 @@ lint:python:
   stage: lint
   image: python:${PYTHON_VERSION}-slim
   before_script:
-    - pip install ruff black mypy
+    - pip install ruff mypy
   script:
     - ruff check src/ tests/
-    - black --check src/ tests/
+    - ruff format --check src/ tests/
     - mypy src/ || true
 
 # Test Stage

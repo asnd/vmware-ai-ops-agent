@@ -6,6 +6,21 @@ AI-powered proactive maintenance agent for VMware vRealize Operations (vROps) an
 
 VMware AI Ops Agent continuously monitors your VMware infrastructure, uses AI to detect anomalies and predict failures before they happen, and can automatically remediate issues with built-in safety guardrails.
 
+## Documentation
+
+Full documentation lives in [`docs/`](docs/README.md):
+[architecture](docs/architecture.md) ·
+[configuration](docs/configuration.md) ·
+[CLI](docs/cli.md) ·
+[modules/API](docs/modules.md) ·
+[patterns](docs/patterns.md) ·
+[deployment](docs/deployment.md) ·
+[observability](docs/observability.md) ·
+[security](docs/security.md) ·
+[extending](docs/extending.md) ·
+[troubleshooting](docs/troubleshooting.md).
+Proposed features are tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Features
 
 - **Predictive Failure Detection**: LLM-powered analysis of metrics and logs to predict failures before they occur
@@ -13,7 +28,7 @@ VMware AI Ops Agent continuously monitors your VMware infrastructure, uses AI to
 - **Automated Remediation**: Safe execution framework with approval workflows, rate limiting, and forbidden action lists
 - **Pattern Library**: 10+ known infrastructure issue patterns (APD, PDL, memory pressure, vMotion failures, etc.)
 - **Multi-channel Notifications**: Slack, Email, ServiceNow integration
-- **Knowledge Base**: ChromaDB vector store for incident history and similar case matching
+- **Knowledge Base**: FAISS vector store for incident history and similar case matching
 - **Prometheus Metrics**: Full observability with custom metrics
 
 ## Architecture
@@ -240,7 +255,7 @@ docker run -d \
 ### Docker Compose
 
 ```bash
-# Start full stack (agent + ChromaDB + LightLLM + Prometheus + Grafana)
+# Start full stack (agent + ariaops-mcp + entrag-mcp + LightLLM + Prometheus + Grafana)
 docker-compose up -d
 
 # View logs
@@ -272,9 +287,9 @@ pytest
 # Run with coverage
 pytest --cov=vmware_ai_ops_agent
 
-# Lint
+# Lint and format
 ruff check src/
-black --check src/
+ruff format --check src/
 
 # Type check
 mypy src/
@@ -292,7 +307,7 @@ vmware-ai-ops-agent/
 │   ├── analysis/            # AI analysis
 │   │   ├── models.py        # Analysis result models
 │   │   ├── llm_engine.py    # LLM-powered analysis
-│   │   └── knowledge_base.py # ChromaDB integration
+│   │   └── knowledge_base.py # FAISS integration
 │   ├── correlation/         # Issue correlation
 │   │   ├── patterns.py      # Known issue patterns
 │   │   └── engine.py        # Correlation engine

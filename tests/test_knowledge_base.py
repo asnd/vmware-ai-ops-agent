@@ -22,6 +22,7 @@ from vmware_ai_ops_agent.config import KnowledgeBaseConfig, VectorDBConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_kb(tmp_path: Path, signing_secret: str = "test-signing-secret") -> KnowledgeBase:
     vector_cfg = VectorDBConfig(persist_directory=str(tmp_path))
     kb_cfg = KnowledgeBaseConfig()
@@ -51,6 +52,7 @@ def _sign_manifest(tmp_path: Path, signing_secret: str = "test-signing-secret") 
 # ---------------------------------------------------------------------------
 # Manifest signing tests
 # ---------------------------------------------------------------------------
+
 
 class TestKnowledgeBaseSignature:
     def test_save_and_verify_manifest(self, tmp_path):
@@ -135,6 +137,7 @@ class TestKnowledgeBaseSignature:
 # Async FAISS dispatch (P1)
 # ---------------------------------------------------------------------------
 
+
 class TestKnowledgeBaseAsync:
     @pytest.mark.asyncio
     async def test_search_similar_uses_thread(self, tmp_path):
@@ -154,8 +157,10 @@ class TestKnowledgeBaseAsync:
             calls_from_thread.append(func)
             return await original_to_thread(func, *args, **kwargs)
 
-        with patch("vmware_ai_ops_agent.analysis.knowledge_base.asyncio.to_thread",
-                   side_effect=tracking_to_thread):
+        with patch(
+            "vmware_ai_ops_agent.analysis.knowledge_base.asyncio.to_thread",
+            side_effect=tracking_to_thread,
+        ):
             await kb.search_similar("test query")
 
         assert len(calls_from_thread) >= 1, "search_similar should dispatch to thread"
@@ -180,10 +185,14 @@ class TestKnowledgeBaseAsync:
             return mock_db
 
         with (
-            patch("vmware_ai_ops_agent.analysis.knowledge_base.asyncio.to_thread",
-                  side_effect=tracking_to_thread),
-            patch("vmware_ai_ops_agent.analysis.knowledge_base.OpenAIEmbeddings",
-                  return_value=kb._embeddings),
+            patch(
+                "vmware_ai_ops_agent.analysis.knowledge_base.asyncio.to_thread",
+                side_effect=tracking_to_thread,
+            ),
+            patch(
+                "vmware_ai_ops_agent.analysis.knowledge_base.OpenAIEmbeddings",
+                return_value=kb._embeddings,
+            ),
         ):
             await kb.initialize()
 

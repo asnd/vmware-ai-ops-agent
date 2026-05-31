@@ -3,9 +3,9 @@
 AI-powered proactive maintenance agent for VMware vROps and vRLI using LLMs.
 
 ## Tech Stack
-- **Language**: Python 3.10+
-- **LLM**: OpenAI API
-- **Vector DB**: ChromaDB
+- **Language**: Python 3.11+
+- **LLM**: OpenAI-compatible API (LightLLM/vLLM/OpenAI)
+- **Vector DB**: FAISS
 - **CLI**: Typer, Rich
 - **Scheduling**: APScheduler
 - **Metrics**: Prometheus client
@@ -28,7 +28,6 @@ pytest --cov=src
 # Code quality
 ruff check .
 ruff format .
-black .
 mypy src/
 
 # Docker
@@ -61,7 +60,7 @@ docker-compose up -d
 - **nsx-avi-reference** - For VMware infrastructure context
 
 ### Recommended Workflow
-1. Use `ruff check` and `black` before committing
+1. Use `ruff check` and `ruff format` before committing
 2. Run `pytest` with coverage
 3. Test LLM prompts in isolation before integration
 4. Monitor with Prometheus metrics

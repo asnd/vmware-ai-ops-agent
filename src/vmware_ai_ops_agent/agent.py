@@ -22,6 +22,7 @@ from .collectors.models import InfrastructureState
 from .collectors.vrli import VRLICollector
 from .config import Settings
 from .correlation.engine import CorrelatedIssue, CorrelationEngine, CorrelationResult
+from .correlation.patterns import KNOWN_PATTERNS, load_custom_patterns
 from .graph import create_agent_graph
 from .mcp_clients.ariaops import AriaOpsMCPClient
 from .mcp_clients.entrag import EntragMCPClient
@@ -65,7 +66,7 @@ class VMwareAIOpsAgent:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.state = AgentState()
-        self.correlation_engine = CorrelationEngine()
+        self.correlation_engine = CorrelationEngine(patterns=self._load_patterns())
         self.llm_engine = LLMAnalysisEngine(settings.llm)
         self._metrics_server = None
 
@@ -112,6 +113,19 @@ class VMwareAIOpsAgent:
         self._on_issue_detected: Callable[[CorrelatedIssue], None] | None = None
         self._on_analysis_complete: Callable[[AnalysisResult], None] | None = None
         self._approval_callback: Callable[[Any], bool] | None = None
+
+    def _load_patterns(self) -> list:
+        """Merge built-in patterns with any site-specific ones from config."""
+        patterns = list(KNOWN_PATTERNS)
+        custom_file = self.settings.correlation.custom_patterns_file
+        if custom_file:
+            try:
+                custom = load_custom_patterns(custom_file)
+                patterns.extend(custom)
+                logger.info("Custom correlation patterns loaded", count=len(custom))
+            except Exception as e:
+                logger.error("Failed to load custom patterns", error=str(e))
+        return patterns
 
     async def start(self) -> None:
         logger.info("Starting VMware AI Ops Agent")
