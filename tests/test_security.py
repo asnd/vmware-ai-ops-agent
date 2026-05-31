@@ -31,3 +31,17 @@ def test_scrub_sensitive_data_mixed():
     assert "supersecret" not in scrubbed
     assert "[REDACTED_EMAIL]" in scrubbed
     assert "[REDACTED_IP]" in scrubbed
+
+
+def test_scrub_sensitive_data_authorization_header():
+    text = "Authorization: fake-token-123"
+    scrubbed = scrub_sensitive_data(text)
+    assert "fake-token-123" not in scrubbed
+    assert scrubbed == "Authorization: [REDACTED]"
+
+
+def test_scrub_sensitive_data_private_key_with_symbols():
+    text = 'private_key="abc/def+ghi=123"'
+    scrubbed = scrub_sensitive_data(text)
+    assert "abc/def+ghi=123" not in scrubbed
+    assert scrubbed == "private_key: [REDACTED]"

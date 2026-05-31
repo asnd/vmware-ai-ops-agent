@@ -15,6 +15,8 @@ from ..collectors.models import Alert, LogEntry, ResourceHealth, Severity
 
 logger = structlog.get_logger(__name__)
 
+MAX_LOG_PATTERN_LENGTH = 500
+
 
 class PatternCategory(str, Enum):
     STORAGE = "storage"
@@ -235,9 +237,35 @@ class PatternMatcher:
         self.patterns = patterns or KNOWN_PATTERNS
         self._compiled_patterns: dict[str, list[re.Pattern]] = {}
         for pattern in self.patterns:
-            self._compiled_patterns[pattern.id] = [
-                re.compile(p, re.IGNORECASE) for p in pattern.log_patterns
-            ]
+            self._compiled_patterns[pattern.id] = self._compile_log_patterns(pattern)
+
+    def _compile_log_patterns(self, pattern: KnownPattern) -> list[re.Pattern]:
+        compiled: list[re.Pattern] = []
+        for raw_pattern in pattern.log_patterns:
+            if not isinstance(raw_pattern, str):
+                logger.warning(
+                    "Skipping non-string log pattern",
+                    pattern_id=pattern.id,
+                    pattern_type=type(raw_pattern).__name__,
+                )
+                continue
+            if len(raw_pattern) > MAX_LOG_PATTERN_LENGTH:
+                logger.warning(
+                    "Skipping oversized log pattern",
+                    pattern_id=pattern.id,
+                    max_length=MAX_LOG_PATTERN_LENGTH,
+                )
+                continue
+            try:
+                compiled.append(re.compile(raw_pattern, re.IGNORECASE))
+            except re.error as e:
+                logger.warning(
+                    "Skipping invalid log pattern",
+                    pattern_id=pattern.id,
+                    pattern=raw_pattern[:80],
+                    error=str(e),
+                )
+        return compiled
 
     def match_logs(self, logs: list[LogEntry]) -> list[tuple[KnownPattern, list[LogEntry]]]:
         matches = []

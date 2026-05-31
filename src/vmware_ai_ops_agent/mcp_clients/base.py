@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -48,6 +49,12 @@ class BaseMCPClient:
     """
 
     def __init__(self, base_url: str, auth_token: str | None = None, timeout: float = 60.0):
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("MCP base_url must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password:
+            raise ValueError("MCP base_url must not contain embedded credentials")
+
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
         self.timeout = timeout
@@ -71,34 +78,41 @@ class BaseMCPClient:
             timeout=self.timeout,
         )
 
-        init_request = {
-            "jsonrpc": "2.0",
-            "id": next(self._rpc_counter),
-            "method": "initialize",
-            "params": {
-                "protocolVersion": _MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "vmware-ai-ops-agent", "version": "1.0.0"},
-            },
-        }
-        response = await self._client.post("/mcp", json=init_request)
-        response.raise_for_status()
-        result = self._decode_response(response)
+        try:
+            init_request = {
+                "jsonrpc": "2.0",
+                "id": next(self._rpc_counter),
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "vmware-ai-ops-agent", "version": "1.0.0"},
+                },
+            }
+            response = await self._client.post("/mcp", json=init_request)
+            response.raise_for_status()
+            result = self._decode_response(response)
 
-        self._session_id = response.headers.get("mcp-session-id")
+            self._session_id = response.headers.get("mcp-session-id")
 
-        notify_headers: dict[str, str] = {}
-        if self._session_id:
-            notify_headers["mcp-session-id"] = self._session_id
+            notify_headers: dict[str, str] = {}
+            if self._session_id:
+                notify_headers["mcp-session-id"] = self._session_id
 
-        await self._client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-            headers=notify_headers,
-        )
+            notify_response = await self._client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                headers=notify_headers,
+            )
+            notify_response.raise_for_status()
 
-        server_name = (result or {}).get("result", {}).get("serverInfo", {}).get("name", "unknown")
-        logger.info(f"{self.__class__.__name__} connected", server_name=server_name)
+            server_name = (
+                (result or {}).get("result", {}).get("serverInfo", {}).get("name", "unknown")
+            )
+            logger.info(f"{self.__class__.__name__} connected", server_name=server_name)
+        except Exception:
+            await self.disconnect()
+            raise
 
     async def disconnect(self) -> None:
         """Close the underlying HTTP client."""
