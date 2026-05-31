@@ -77,8 +77,10 @@ class CorrelationResult:
 class CorrelationEngine:
     """Engine for correlating infrastructure data."""
 
-    def __init__(self):
-        self.pattern_matcher = PatternMatcher()
+    def __init__(self, patterns: list[KnownPattern] | None = None):
+        # ``patterns=None`` uses the built-in KNOWN_PATTERNS; callers can pass a
+        # merged list (built-ins + site-specific) loaded from config.
+        self.pattern_matcher = PatternMatcher(patterns)
         self._issue_counter = 0
 
     def _generate_issue_id(self) -> str:

@@ -16,6 +16,7 @@ from vmware_ai_ops_agent.mcp_clients.entrag import EntragMCPClient
 # SSE body parser
 # ---------------------------------------------------------------------------
 
+
 class TestParseSseBody:
     def test_single_data_event(self):
         payload = {"jsonrpc": "2.0", "id": 1, "result": {"content": []}}
@@ -45,6 +46,7 @@ class TestParseSseBody:
 # ---------------------------------------------------------------------------
 # Header negotiation (A2)
 # ---------------------------------------------------------------------------
+
 
 class TestBaseMCPClientHeaders:
     def _make_init_response(self, session_id: str = "s1") -> MagicMock:
@@ -107,6 +109,7 @@ class TestBaseMCPClientHeaders:
 # SSE response decoding
 # ---------------------------------------------------------------------------
 
+
 class TestDecodeResponse:
     def test_json_content_type_parsed_as_json(self):
         client = BaseMCPClient(base_url="http://x")
@@ -127,6 +130,7 @@ class TestDecodeResponse:
 # ---------------------------------------------------------------------------
 # Retry on transport errors (A3)
 # ---------------------------------------------------------------------------
+
 
 class TestCallToolRetry:
     @pytest.mark.asyncio
@@ -202,6 +206,7 @@ class TestCallToolRetry:
 # ---------------------------------------------------------------------------
 # RPC ID sequencing
 # ---------------------------------------------------------------------------
+
 
 class TestRpcIdSequencing:
     def test_ids_are_sequential_and_unique(self):

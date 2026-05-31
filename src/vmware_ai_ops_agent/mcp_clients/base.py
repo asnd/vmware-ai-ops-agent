@@ -147,9 +147,7 @@ class BaseMCPClient:
         result = self._decode_response(response)
 
         if result and "error" in result:
-            raise RuntimeError(
-                f"MCP tool error: {result['error'].get('message', 'Unknown error')}"
-            )
+            raise RuntimeError(f"MCP tool error: {result['error'].get('message', 'Unknown error')}")
 
         content = (result or {}).get("result", {}).get("content", [])
         if not content:
