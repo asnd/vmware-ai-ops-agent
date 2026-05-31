@@ -152,6 +152,13 @@ class KnowledgeBaseConfig(BaseModel):
     signing_secret: SecretStr = SecretStr("")
 
 
+class CorrelationConfig(BaseModel):
+    """Correlation engine configuration."""
+
+    # Optional YAML file of site-specific patterns merged with the built-ins.
+    custom_patterns_file: str = ""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="VMWARE_AI_", env_nested_delimiter="__", extra="ignore"
@@ -167,6 +174,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
+    correlation: CorrelationConfig = Field(default_factory=CorrelationConfig)
     ariaops_mcp: AriaOpsMCPConfig = Field(default_factory=AriaOpsMCPConfig)
     entrag_mcp: EntragMCPConfig = Field(default_factory=EntragMCPConfig)
 
