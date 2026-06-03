@@ -23,9 +23,11 @@ There are **two independent** mechanisms — know which one you're using:
 
 1. **YAML `${VAR}` placeholders.** During `from_yaml`, any string value of the
    exact form `${NAME}` is replaced by the environment variable `NAME` (or an
-   empty string if unset). These are *bare* names you choose in the YAML, e.g.
-   `password: ${VROPS_PASSWORD}` reads `$VROPS_PASSWORD`. This is a custom
-   expansion in `Settings._expand_env_vars`.
+   empty string if unset). Expansion is recursive across nested maps and lists.
+   These are *bare* names you choose in the YAML, e.g. `password:
+   ${VROPS_PASSWORD}` reads `$VROPS_PASSWORD` and `recipients:
+   [${OPS_EMAIL}]` reads `$OPS_EMAIL`. This is a custom expansion in
+   `Settings._expand_env_vars`.
 
 2. **Pydantic-settings env vars.** `Settings` uses `env_prefix="VMWARE_AI_"` and
    `env_nested_delimiter="__"`, so you can set any field directly from the
@@ -58,6 +60,14 @@ is present **only when the corresponding host is non-default**. The checks are:
 
 So a fresh sample config validates fine; the moment you point at a real vCenter
 without supplying its password, `validate` (and startup) fail with a clear error.
+
+## YAML shape and empty files
+
+Configuration files must have a YAML mapping at the top level, with section names
+such as `vrops`, `vrli`, and `notifications`. Empty files are accepted and load
+the same defaults as `Settings()`, which is useful when you want to configure the
+agent entirely through `VMWARE_AI_...` environment variables. Top-level lists or
+scalar values are rejected with a clear error.
 
 ## Sections reference
 
