@@ -106,6 +106,54 @@ vrops:
                 del os.environ["TEST_VROPS_HOST"]
                 del os.environ["TEST_VROPS_PASS"]
 
+    def test_empty_yaml_uses_defaults(self):
+        """Empty YAML files should load default settings."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            f.flush()
+
+            try:
+                settings = Settings.from_yaml(f.name)
+
+                assert settings.vrops.host == "vrops.example.com"
+                assert settings.agent.cycle_interval == 300
+            finally:
+                os.unlink(f.name)
+
+    def test_top_level_yaml_must_be_mapping(self):
+        """Top-level YAML sequences should fail with a clear error."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("- not\n- a\n- mapping\n")
+            f.flush()
+
+            try:
+                with pytest.raises(ValueError, match="YAML mapping"):
+                    Settings.from_yaml(f.name)
+            finally:
+                os.unlink(f.name)
+
+    def test_settings_env_var_expansion_in_lists(self):
+        """Settings should expand environment variables inside lists."""
+        os.environ["TEST_EMAIL_RECIPIENT"] = "ops@example.com"
+
+        yaml_content = """
+notifications:
+  email:
+    recipients:
+      - ${TEST_EMAIL_RECIPIENT}
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                settings = Settings.from_yaml(f.name)
+
+                assert settings.notifications.email.recipients == ["ops@example.com"]
+            finally:
+                os.unlink(f.name)
+                del os.environ["TEST_EMAIL_RECIPIENT"]
+
     def test_settings_file_not_found(self):
         """Should raise error for missing config file."""
         with pytest.raises(FileNotFoundError):
