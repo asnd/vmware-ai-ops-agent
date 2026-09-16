@@ -4,6 +4,9 @@ out/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 
 # The repository root ignores data/, but this service ships a sample input.
 !data/
