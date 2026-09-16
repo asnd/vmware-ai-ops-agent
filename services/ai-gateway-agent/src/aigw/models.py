@@ -50,6 +50,8 @@ class LLMResult(BaseModel):
     usage: LLMUsage = Field(default_factory=LLMUsage)
     latency_ms: float = 0.0
     cached: bool = False
+    # Whatever llm_gateway.capture_response_headers asked for.
+    gateway_meta: dict[str, str] = Field(default_factory=dict)
     # Populated when response_format=json_object and the answer parsed cleanly.
     parsed: Any | None = None
 

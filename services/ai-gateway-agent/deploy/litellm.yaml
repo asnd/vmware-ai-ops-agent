@@ -1,10 +1,31 @@
-# Minimal LiteLLM proxy config used by docker-compose. Replace the model list
-# with whatever your gateway actually fronts.
+# LiteLLM proxy config used by docker-compose.
+#
+# `model_name` is the alias this agent asks for (llm_gateway.model in our config).
+# The agent never names a provider — swapping the backend happens only here.
+
 model_list:
-  - model_name: gpt-4o-mini
+  - model_name: ops-analysis            # what the agent requests
     litellm_params:
-      model: openai/gpt-4o-mini
+      model: openai/gpt-4o-mini         # what LiteLLM actually calls
       api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: ops-analysis-fallback
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  # The agent already retries transport errors; these cover provider-side faults
+  # before the response ever gets back to us.
+  num_retries: 2
+  request_timeout: 60
+  allowed_fails: 3
+  cooldown_time: 30
+  fallbacks:
+    - ops-analysis: ["ops-analysis-fallback"]
 
 general_settings:
   master_key: os.environ/LLM_GATEWAY_API_KEY
+  # Per-key budgets and virtual keys need a database; with master_key alone the
+  # proxy still routes fine, it just cannot resolve or meter virtual keys.
+  # database_url: os.environ/DATABASE_URL

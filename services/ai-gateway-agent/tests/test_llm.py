@@ -112,3 +112,42 @@ def test_cache_evicts_the_oldest_entry():
     cache.put("b", LLMResult(content="b"))
     assert cache.get("a") is None
     assert cache.get("b") is not None
+
+
+@respx.mock
+async def test_captures_only_the_requested_gateway_headers(chat_response):
+    respx.post(URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=chat_response,
+            headers={
+                "x-litellm-model-id": "deploy-7",
+                "x-litellm-call-id": "call-abc",
+                "x-secret-internal": "nope",
+            },
+        )
+    )
+    cfg = _cfg(capture_response_headers=["x-litellm-model-id", "x-litellm-call-id"])
+    async with LLMGatewayClient(cfg) as client:
+        result = await client.complete(_enriched())
+
+    assert result.gateway_meta == {
+        "x-litellm-model-id": "deploy-7",
+        "x-litellm-call-id": "call-abc",
+    }
+
+
+@respx.mock
+async def test_missing_headers_are_simply_absent(chat_response):
+    respx.post(URL).mock(return_value=httpx.Response(200, json=chat_response))
+    async with LLMGatewayClient(_cfg(capture_response_headers=["x-litellm-call-id"])) as client:
+        result = await client.complete(_enriched())
+    assert result.gateway_meta == {}
+
+
+@respx.mock
+async def test_non_json_gateway_response_is_reported():
+    respx.post(URL).mock(return_value=httpx.Response(200, text="<html>502 from a proxy</html>"))
+    async with LLMGatewayClient(_cfg()) as client:
+        with pytest.raises(LLMGatewayError, match="non-JSON"):
+            await client.complete(_enriched())

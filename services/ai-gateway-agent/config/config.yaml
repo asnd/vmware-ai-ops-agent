@@ -29,6 +29,9 @@ llm_gateway:
   model: gpt-4o-mini
   api_key_env: LLM_GATEWAY_API_KEY
   response_format: text
+  capture_response_headers:
+    - x-litellm-model-id
+    - x-litellm-call-id
 
 sink:
   type: file
