@@ -86,10 +86,14 @@ enrichment:
 # ------------------------------------------------------- the LLM Gateway
 # Any OpenAI-compatible endpoint: LiteLLM, Portkey, Kong AI Gateway,
 # Envoy AI Gateway, vLLM, or the provider API directly.
+# The settings below are filled in for LiteLLM (see deploy/litellm.yaml).
 llm_gateway:
   base_url: http://litellm-gateway:4000/v1
   chat_path: /chat/completions
-  model: gpt-4o-mini
+  # A LiteLLM `model_name` alias from its model_list, NOT a provider model id.
+  # Swapping the actual backend then happens in the gateway, not here.
+  model: ops-analysis
+  # LiteLLM master key, or a virtual key issued by it (virtual keys need a DB).
   api_key_env: LLM_GATEWAY_API_KEY
   timeout_seconds: 90
   max_retries: 3
@@ -98,9 +102,24 @@ llm_gateway:
   temperature: 0.2
   max_tokens: 1024
   response_format: json_object   # text | json_object
-  # Routing hints / virtual keys the gateway understands.
-  extra_headers: {}
-  extra_body: {}
+
+  # Sent verbatim. LiteLLM reads `x-litellm-tags` for spend attribution;
+  # Portkey and Kong use their own routing headers here instead.
+  extra_headers:
+    x-litellm-tags: "team-ops,ai-gateway-agent"
+
+  # Merged into the request body. LiteLLM stores `metadata.spend_logs_metadata`
+  # alongside the spend log, which is how a cost line traces back to a run.
+  extra_body:
+    metadata:
+      spend_logs_metadata:
+        service: ai-gateway-agent
+
+  # Copied into the result and logged — this is what lets you find the same call
+  # in the gateway's own logs when an answer looks wrong.
+  capture_response_headers:
+    - x-litellm-model-id
+    - x-litellm-call-id
 
 # --------------------------------------------------------------- output
 sink:

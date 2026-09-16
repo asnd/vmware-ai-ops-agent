@@ -127,6 +127,10 @@ class LLMGatewayConfig(BaseModel):
     # Extra headers/body merged verbatim — gateway routing hints, virtual keys, tags.
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    # Response headers copied into the result and the log line. Gateways return
+    # their routing decision this way (LiteLLM: x-litellm-model-id, x-litellm-call-id),
+    # which is what makes an answer traceable back through the gateway.
+    capture_response_headers: list[str] = Field(default_factory=list)
     verify_tls: bool = True
 
     @property

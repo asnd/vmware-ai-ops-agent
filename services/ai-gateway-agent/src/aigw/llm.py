@@ -160,11 +160,13 @@ class LLMGatewayClient:
         LLM_REQUESTS.labels(effective_model, "ok").inc()
 
         result = self._parse(response, latency_ms=latency * 1000)
+        if result.gateway_meta:
+            log.debug("llm.gateway_meta", record_id=enriched.record.id, **result.gateway_meta)
         if cache_key and self.cache:
             self.cache.put(cache_key, result)
         return result
 
-    async def _send(self, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    async def _send(self, payload: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
         client = self._http()
         retrying = AsyncRetrying(
             stop=stop_after_attempt(max(1, self.cfg.max_retries)),
@@ -178,10 +180,14 @@ class LLMGatewayClient:
             with attempt:
                 response = await client.post(self.cfg.chat_url, json=payload, headers=headers)
                 response.raise_for_status()
-                return response.json()
+                return response
         raise LLMGatewayError("unreachable")  # pragma: no cover - tenacity always returns
 
-    def _parse(self, body: dict[str, Any], latency_ms: float) -> LLMResult:
+    def _parse(self, response: httpx.Response, latency_ms: float) -> LLMResult:
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise LLMGatewayError(f"gateway returned non-JSON: {response.text[:500]}") from exc
         try:
             choice = body["choices"][0]
             content = choice["message"]["content"]
@@ -208,6 +214,12 @@ class LLMGatewayClient:
             except json.JSONDecodeError:
                 log.warning("llm.json_parse_failed", preview=content[:200])
 
+        gateway_meta = {
+            name: response.headers[name]
+            for name in self.cfg.capture_response_headers
+            if name in response.headers
+        }
+
         return LLMResult(
             content=content or "",
             model=body.get("model"),
@@ -215,4 +227,5 @@ class LLMGatewayClient:
             usage=usage,
             latency_ms=round(latency_ms, 2),
             parsed=parsed,
+            gateway_meta=gateway_meta,
         )

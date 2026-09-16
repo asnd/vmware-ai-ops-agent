@@ -40,7 +40,7 @@ in a component built for them.
 
 ## Do you need to build it at all?
 
-Three honest alternatives before writing code:
+Four honest alternatives, three of them without writing code:
 
 1. **Do the enrichment inside the gateway.** If all you need is "prepend a system
    prompt / fill a template", gateways already do this as configuration:
@@ -48,15 +48,24 @@ Three honest alternatives before writing code:
    same names, kgateway/agentgateway prompt enrichment. No new service, no new
    deployment. This stops being enough as soon as enrichment means *calling other
    services* and reshaping their output.
-2. **Use a pipeline framework and just deploy it.** Haystack + Hayhooks, LangChain
+2. **Use a low-code orchestrator.** n8n (Schedule/Webhook trigger → HTTP Request →
+   Code → LLM → file) or Dify (workflow published as a REST endpoint in one click)
+   cover this exact shape with zero code. The cost is a stateful platform with its
+   own database and credential store, and a workflow that lives as a JSON blob
+   rather than something reviewable in a diff.
+3. **Use a pipeline framework and just deploy it.** Haystack + Hayhooks, LangChain
    + LangServe, LlamaIndex Workflows, BentoML, Ray Serve — each turns a pipeline
    into a REST service. Right answer when the pipeline is about to grow branches,
    RAG, or agent loops; heavier than needed for fetch → template → call → write.
-3. **Build a small service like this one.** Justified when the enrichment is
-   domain-specific, the dependencies are your own services, and you want a plain
-   container with no framework runtime underneath.
+4. **Build a small service like this one.** Justified when the enrichment is
+   domain-specific, the dependencies are your own services, redaction before the
+   prompt is a control you want under test, and you want a plain container in the
+   stack the rest of the repository already uses.
 
-This repository is option 3, deliberately kept thin enough to throw away.
+This repository is option 4, chosen deliberately over the others and kept thin
+enough to throw away: 1172 lines of logic, 445 of tests. If the workflow ends up
+being edited by non-developers, or there are ten of these rather than one, option
+2 wins and this service should be retired rather than grown.
 
 ## Quick start
 
@@ -99,6 +108,33 @@ curl -s localhost:8080/v1/process \
 Per-request overrides: `model`, `system_prompt`, `static_context`, `publish`
 (also write to the sink), `bypass_cache`.
 
+## Working with LiteLLM
+
+The gateway in `docker-compose.yaml` is LiteLLM, and `deploy/litellm.yaml` is a
+working reference rather than a placeholder. What matters at the seam:
+
+- **`llm_gateway.model` is a LiteLLM alias**, a `model_name` from its `model_list`
+  (`ops-analysis`), never a provider model id. Changing which model actually
+  answers is then a gateway edit, and this service never learns a provider name.
+- **Retries exist on both sides and do different jobs.** LiteLLM's
+  `router_settings.num_retries` and `fallbacks` handle provider-side faults before
+  a response comes back; this service's `max_retries` covers the hop to the gateway
+  itself. Keep both modest — they multiply.
+- **Spend attribution is config, not code.** `extra_headers['x-litellm-tags']` tags
+  the request, and `extra_body.metadata.spend_logs_metadata` rides along into the
+  spend log, so a cost line can be traced back to a run.
+- **Virtual keys need a database.** With `master_key` alone the proxy routes fine,
+  but per-key budgets and virtual keys cannot be resolved or metered.
+- **`capture_response_headers`** copies LiteLLM's routing decision
+  (`x-litellm-model-id`, `x-litellm-call-id`) into the result and the log line —
+  this is what lets you find the same call in the gateway's own logs when an
+  answer looks wrong. It is opt-in and vendor-neutral: name whatever headers your
+  gateway returns.
+- **Health probes differ.** LiteLLM exposes `/health/liveliness` and
+  `/health/readiness` on its own port; this service's `/readyz` reports its wiring
+  and deliberately does not call the gateway, so a gateway outage does not take
+  the agent's readiness down with it.
+
 ## Configuration
 
 Everything lives in `config/config.yaml` (`AIGW_CONFIG` picks another path);
@@ -113,7 +149,7 @@ Everything lives in `config/config.yaml` (`AIGW_CONFIG` picks another path);
 | --- | --- |
 | `source` | `http` (pull a sibling service) or `file` (json / jsonl / text), `records_path`, `max_records` |
 | `enrichment` | `static_context`, `include_fields`, `redact_fields`, `lookups`, Jinja2 `prompt.system` / `prompt.template` |
-| `llm_gateway` | `base_url`, `model`, `api_key_env`, retries/backoff, `response_format`, `extra_headers`/`extra_body` |
+| `llm_gateway` | `base_url`, `model`, `api_key_env`, retries/backoff, `response_format`, `extra_headers`/`extra_body`, `capture_response_headers` |
 | `sink` | `file` (atomic write + optional JSONL append), `http` (webhook with retries), or `none` |
 | `server` | bind address, optional inbound `api_key_env`, CORS |
 | `scheduler` | periodic pull: `interval_seconds`, `jitter_seconds` |
@@ -137,11 +173,13 @@ variables raise instead of silently rendering empty.
   `aigw_llm_latency_seconds`, `aigw_llm_tokens_total`, `aigw_cache_total`,
   `aigw_sink_total`, `aigw_pipeline_latency_seconds`.
 - **Logs**: structlog, JSON by default, every line carries the record id.
+- **Traceability**: captured gateway headers land in `result.gateway_meta`, so a
+  stored answer points at the gateway call that produced it.
 
 ## Tests
 
 ```bash
-pytest -q          # 46 tests, gateway and sibling services mocked with respx
+pytest -q          # 50 tests, gateway and sibling services mocked with respx
 ruff check . && ruff format --check .
 mypy src/
 ```
