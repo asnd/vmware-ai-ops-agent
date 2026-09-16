@@ -1,0 +1,51 @@
+# Local development defaults: read a file, answer, write files.
+# See config/config.example.yaml for the full, annotated set of options.
+
+service_name: ai-gateway-agent
+
+source:
+  type: file
+  file:
+    path: data/input.example.json
+    format: json
+
+enrichment:
+  static_context:
+    environment: lab
+  prompt:
+    system: |
+      You are an infrastructure operations analyst.
+      Answer only from the data provided. Be concise.
+    template: |
+      Environment: {{ static.environment }}
+
+      ## Event
+      {{ record | tojson(indent=2) }}
+
+      Assess this event and propose the next actions.
+
+llm_gateway:
+  base_url: http://localhost:4000/v1
+  model: gpt-4o-mini
+  api_key_env: LLM_GATEWAY_API_KEY
+  response_format: text
+
+sink:
+  type: file
+  file:
+    path: out
+    filename_template: "{date}/{id}.json"
+    append_jsonl: out/results.jsonl
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  api_key_env: AIGW_API_KEY
+
+scheduler:
+  enabled: false
+  interval_seconds: 300
+
+observability:
+  log_level: INFO
+  log_format: console

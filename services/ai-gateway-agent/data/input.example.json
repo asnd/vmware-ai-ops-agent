@@ -1,0 +1,22 @@
+[
+  {
+    "id": "alert-1001",
+    "resource_id": "esxi-07.dc-fra-01",
+    "severity": "critical",
+    "metric": "cpu.demand_pct",
+    "value": 97.4,
+    "threshold": 85,
+    "observed_at": "2026-09-16T08:41:00Z",
+    "message": "Sustained CPU contention on host esxi-07 for 25 minutes"
+  },
+  {
+    "id": "alert-1002",
+    "resource_id": "ds-nfs-02",
+    "severity": "warning",
+    "metric": "datastore.free_pct",
+    "value": 8.2,
+    "threshold": 15,
+    "observed_at": "2026-09-16T08:55:00Z",
+    "message": "Datastore ds-nfs-02 below free-space threshold"
+  }
+]
