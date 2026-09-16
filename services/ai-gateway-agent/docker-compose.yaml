@@ -1,0 +1,32 @@
+services:
+  ai-gateway-agent:
+    build: .
+    image: ai-gateway-agent:0.1.0
+    ports:
+      - "8080:8080"
+    environment:
+      AIGW_CONFIG: /app/config/config.yaml
+      # Secrets come from the environment, never from the YAML file.
+      LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:-sk-local}
+      AIGW_API_KEY: ${AIGW_API_KEY:-}
+      # Point the agent at the gateway below instead of the YAML default.
+      AIGW__LLM_GATEWAY__BASE_URL: http://llm-gateway:4000/v1
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data:ro
+      - ./out:/app/out
+    depends_on:
+      - llm-gateway
+    restart: unless-stopped
+
+  # Stand-in for whatever OpenAI-compatible gateway you actually run.
+  llm-gateway:
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ["--config", "/app/litellm.yaml", "--port", "4000"]
+    ports:
+      - "4000:4000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ./deploy/litellm.yaml:/app/litellm.yaml:ro
+    restart: unless-stopped

@@ -1,0 +1,146 @@
+# ai-gateway-agent — example configuration.
+#
+# Secrets are never written here. A `*_env` field names the environment variable
+# that carries the secret. Any value below can also be overridden at runtime with
+# AIGW__<SECTION>__<FIELD>, e.g. AIGW__LLM_GATEWAY__MODEL=gpt-4o.
+
+service_name: ai-gateway-agent
+
+# ---------------------------------------------------------------- input
+source:
+  # "http" pulls from a sibling microservice, "file" reads from disk.
+  type: http
+  max_records: 50
+
+  http:
+    url: http://alerts-service:8000/api/v1/alerts
+    method: GET
+    params:
+      status: active
+      severity: critical
+    auth:
+      type: bearer
+      token_env: SOURCE_API_TOKEN
+    timeout_seconds: 15
+    # Dotted path to the array inside the response body.
+    records_path: data.items
+
+  file:
+    path: data/input.json
+    format: json        # json | jsonl | text
+    records_path: null
+
+# ------------------------------------------------------------- the agent
+enrichment:
+  # Constants available in the template as `static`.
+  static_context:
+    environment: production
+    datacenter: dc-fra-01
+    runbook_url: https://wiki.internal/runbooks/vmware
+
+  # Only these top-level fields reach the LLM (empty list = all of them).
+  include_fields: []
+  # Always masked before the prompt is built.
+  redact_fields:
+    - password
+    - api_token
+
+  # Extra HTTP calls whose responses land in the template as `context.<name>`.
+  # `{id}` and any record field can be interpolated into the URL.
+  lookups:
+    - name: host_inventory
+      url: http://cmdb-service:8000/api/v1/hosts/{resource_id}
+      timeout_seconds: 10
+      optional: true
+    - name: recent_changes
+      url: http://change-service:8000/api/v1/changes?resource={resource_id}&window=24h
+      timeout_seconds: 10
+      optional: true
+      records_path: items
+
+  prompt:
+    system: |
+      You are an infrastructure operations analyst.
+      Answer only from the data provided. If something is missing, say so explicitly.
+      Respond as JSON with the keys: summary, probable_cause, severity, actions.
+    template: |
+      Environment: {{ static.environment }} ({{ static.datacenter }})
+      Runbook: {{ static.runbook_url }}
+
+      ## Event
+      {{ record | tojson(indent=2) }}
+
+      {% if context.host_inventory %}
+      ## Host inventory
+      {{ context.host_inventory | tojson(indent=2) }}
+      {% endif %}
+
+      {% if context.recent_changes %}
+      ## Changes in the last 24h
+      {{ context.recent_changes | tojson(indent=2) }}
+      {% endif %}
+
+      Assess this event and propose the next actions.
+    max_input_chars: 24000
+
+# ------------------------------------------------------- the LLM Gateway
+# Any OpenAI-compatible endpoint: LiteLLM, Portkey, Kong AI Gateway,
+# Envoy AI Gateway, vLLM, or the provider API directly.
+llm_gateway:
+  base_url: http://litellm-gateway:4000/v1
+  chat_path: /chat/completions
+  model: gpt-4o-mini
+  api_key_env: LLM_GATEWAY_API_KEY
+  timeout_seconds: 90
+  max_retries: 3
+  backoff_initial_seconds: 0.5
+  backoff_max_seconds: 8
+  temperature: 0.2
+  max_tokens: 1024
+  response_format: json_object   # text | json_object
+  # Routing hints / virtual keys the gateway understands.
+  extra_headers: {}
+  extra_body: {}
+
+# --------------------------------------------------------------- output
+sink:
+  # "file" writes to disk, "http" posts downstream, "none" answers via the API only.
+  type: file
+  file:
+    path: out
+    filename_template: "{date}/{id}.json"
+    append_jsonl: out/results.jsonl
+  http:
+    url: http://reporting-service:8000/api/v1/insights
+    method: POST
+    auth:
+      type: bearer
+      token_env: SINK_API_TOKEN
+    timeout_seconds: 15
+    max_retries: 3
+
+# ------------------------------------------------------------ HTTP server
+server:
+  host: 0.0.0.0
+  port: 8080
+  # Inbound API key; when the variable is unset the API is open.
+  api_key_env: AIGW_API_KEY
+  cors_origins: []
+
+# --------------------------------------------------------- periodic pull
+scheduler:
+  enabled: false
+  interval_seconds: 300
+  jitter_seconds: 30
+  run_on_start: true
+
+# ------------------------------------------------------- prompt de-duping
+cache:
+  enabled: true
+  ttl_seconds: 300
+  max_entries: 1000
+
+observability:
+  log_level: INFO
+  log_format: json      # json | console
+  metrics_enabled: true
