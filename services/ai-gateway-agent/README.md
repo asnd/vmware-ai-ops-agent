@@ -184,6 +184,11 @@ ruff check . && ruff format --check .
 mypy src/
 ```
 
+CI runs exactly these, plus `aigw validate` against both shipped configs and a
+Docker build, in `.github/workflows/ai-gateway-agent.yml`. That workflow is
+scoped by path to this directory, so it is independent of the root package's
+`ci.yml` and neither triggers the other.
+
 ## Layout
 
 ```
