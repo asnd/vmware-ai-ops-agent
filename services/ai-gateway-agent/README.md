@@ -155,7 +155,9 @@ Everything lives in `config/config.yaml` (`AIGW_CONFIG` picks another path);
 | `scheduler` | periodic pull: `interval_seconds`, `jitter_seconds` |
 | `cache` | in-process TTL cache keyed by model + messages |
 
-The prompt template renders with `record` (post-redaction), `raw`, `context`
+The prompt template renders with `record` (`include_fields`-filtered and
+redacted), `raw` (unfiltered but still redacted — `redact_fields` masks a
+field in both, with no way to route around it from a template), `context`
 (lookup results, keyed by lookup name), `static`, `id`, `origin`. Undefined
 variables raise instead of silently rendering empty.
 

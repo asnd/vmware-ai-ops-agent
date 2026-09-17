@@ -47,8 +47,9 @@ def to_records(data: Any, origin: str) -> list[Record]:
     records: list[Record] = []
     for item in data:
         payload = item if isinstance(item, dict) else {"value": item}
-        # Honour an id the upstream system already assigned.
-        rid = payload.get("id") or payload.get("uuid")
+        # Honour an id the upstream system already assigned. Presence, not
+        # truthiness: an id of 0 or "" is still a real id, not a missing one.
+        rid = payload["id"] if "id" in payload else payload.get("uuid")
         record = Record(payload=payload, origin=origin)
         if isinstance(rid, (str, int)):
             record.id = str(rid)

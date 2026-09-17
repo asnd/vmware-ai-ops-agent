@@ -8,8 +8,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .config import Settings, load_settings
@@ -82,6 +83,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    @app.middleware("http")
+    async def limit_body_size(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # Best-effort: catches a declared Content-Length over the limit before we
+        # read the body. A chunked request with no Content-Length slips through —
+        # this is a sanity cap on well-behaved callers, not a hard guarantee.
+        content_length = request.headers.get("content-length")
+        if content_length is not None and content_length.isdigit():
+            if int(content_length) > settings.server.max_body_bytes:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={
+                        "detail": (
+                            f"request body of {content_length} bytes exceeds "
+                            f"server.max_body_bytes ({settings.server.max_body_bytes})"
+                        )
+                    },
+                )
+        return await call_next(request)
 
     auth = Depends(require_api_key(settings))
 

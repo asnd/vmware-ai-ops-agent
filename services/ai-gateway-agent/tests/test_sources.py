@@ -26,6 +26,18 @@ def test_to_records_keeps_upstream_ids():
     assert records[1].id != "alert-1"
 
 
+def test_to_records_keeps_a_falsy_but_present_id():
+    # 0 and "" are real ids from an upstream system, not "no id assigned".
+    records = to_records([{"id": 0}, {"id": ""}], "test")
+    assert records[0].id == "0"
+    assert records[1].id == ""
+
+
+def test_to_records_falls_back_to_uuid_only_when_id_is_absent():
+    records = to_records([{"uuid": "u-1"}], "test")
+    assert records[0].id == "u-1"
+
+
 def test_to_records_wraps_a_bare_dict():
     assert len(to_records({"id": "x"}, "test")) == 1
 

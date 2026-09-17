@@ -89,11 +89,14 @@ class LookupConfig(BaseModel):
     # When true a failing lookup is logged and skipped instead of failing the record.
     optional: bool = True
     records_path: str | None = None
+    verify_tls: bool = True
 
 
 class PromptConfig(BaseModel):
     system: str = "You are a helpful operations assistant. Answer concisely."
-    # Jinja2 template rendered with {record, context, static} in scope.
+    # Jinja2 template rendered with {record, raw, context, static, id, origin} in
+    # scope. `record` is filtered by include_fields; `raw` is not, but — like
+    # `record` — always has redact_fields masked.
     template: str = "{{ record | tojson(indent=2) }}"
     max_input_chars: int = 24_000
 
