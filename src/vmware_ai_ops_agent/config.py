@@ -202,23 +202,23 @@ class Settings(BaseSettings):
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
         with open(path) as f:
-            raw_config = yaml.safe_load(f)
+            raw_config = yaml.safe_load(f) or {}
 
+        if not isinstance(raw_config, dict):
+            raise ValueError("Configuration root must be a YAML mapping")
         config = cls._expand_env_vars(raw_config)
         return cls(**config)
 
     @classmethod
-    def _expand_env_vars(cls, config: dict[str, Any]) -> dict[str, Any]:
-        result = {}
-        for key, value in config.items():
-            if isinstance(value, dict):
-                result[key] = cls._expand_env_vars(value)
-            elif isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-                env_var = value[2:-1]
-                result[key] = os.environ.get(env_var, "")
-            else:
-                result[key] = value
-        return result
+    def _expand_env_vars(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: cls._expand_env_vars(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._expand_env_vars(item) for item in value]
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            env_var = value[2:-1]
+            return os.environ.get(env_var, "")
+        return value
 
 
 def load_settings(config_path: str | Path | None = None) -> Settings:
