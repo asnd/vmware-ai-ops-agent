@@ -11,6 +11,7 @@ from typing import Protocol
 import httpx
 
 from .config import FileSinkConfig, HttpSinkConfig, SinkConfig
+from .llm import RETRYABLE_STATUS
 from .models import ProcessResult
 from .obs import SINK, get_logger
 
@@ -44,7 +45,13 @@ class FileSink:
         return Path(self.cfg.path) / name
 
     async def publish(self, result: ProcessResult) -> str | None:
-        target = self._target(result)
+        try:
+            target = self._target(result)
+        except (KeyError, IndexError) as exc:
+            # A typo'd placeholder in filename_template — this record's problem,
+            # not the whole batch's.
+            SINK.labels("file", "error").inc()
+            raise RuntimeError(f"file sink filename_template is invalid: {exc}") from exc
         # Stamp the destination before serialising so the stored record is self-describing.
         result.sink_ref = str(target)
         body = result.model_dump_json(indent=2)
@@ -105,11 +112,23 @@ class HttpSink:
                     SINK.labels("http", "ok").inc()
                     log.info("sink.posted", url=self.cfg.url, record_id=result.id)
                     return self.cfg.url
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    if exc.response.status_code not in RETRYABLE_STATUS:
+                        # A permanent rejection (bad payload, auth, wrong path) —
+                        # retrying it burns attempts on something that can never work.
+                        log.warning(
+                            "sink.non_retryable",
+                            url=self.cfg.url,
+                            status=exc.response.status_code,
+                        )
+                        break
                 except httpx.HTTPError as exc:
                     last_error = exc
-                    log.warning("sink.retry", url=self.cfg.url, attempt=attempt, error=str(exc))
-                    if attempt < max(1, self.cfg.max_retries):
-                        await asyncio.sleep(min(2 ** (attempt - 1) * 0.5, 8))
+
+                log.warning("sink.retry", url=self.cfg.url, attempt=attempt, error=str(last_error))
+                if attempt < max(1, self.cfg.max_retries):
+                    await asyncio.sleep(min(2 ** (attempt - 1) * 0.5, 8))
         SINK.labels("http", "error").inc()
         raise RuntimeError(f"http sink failed for {self.cfg.url}: {last_error}")
 

@@ -27,23 +27,33 @@ _JINJA = Environment(undefined=StrictUndefined, autoescape=False, enable_async=F
 REDACTED = "***redacted***"
 
 
+def redact(payload: dict[str, Any], redact_fields: list[str]) -> dict[str, Any]:
+    """Mask redact_fields only — every other field survives, no include_fields filter."""
+    data = dict(payload)
+    for field in redact_fields:
+        if field in data:
+            data[field] = REDACTED
+    return data
+
+
 def project(payload: dict[str, Any], cfg: EnrichmentConfig) -> dict[str, Any]:
     """Apply the include/redact policy to a record payload."""
     data = dict(payload)
     if cfg.include_fields:
         data = {k: v for k, v in data.items() if k in cfg.include_fields}
-    for field in cfg.redact_fields:
-        if field in data:
-            data[field] = REDACTED
-    return data
+    return redact(data, cfg.redact_fields)
 
 
 async def run_lookup(
     client: httpx.AsyncClient, lookup: LookupConfig, record: Record
 ) -> tuple[str, Any]:
     """Resolve one lookup. URLs may reference the record: ``/hosts/{id}``."""
+    # record.id last: it always wins over a same-named payload field (they agree
+    # when the upstream record carried its own "id", so this is never a surprise)
+    # and a single merged dict avoids passing "id" both positionally and via **.
+    fields = {**record.payload, "id": record.id}
     try:
-        url = lookup.url.format(id=record.id, **record.payload)
+        url = lookup.url.format(**fields)
     except (KeyError, IndexError):
         # A placeholder the record cannot satisfy — send the URL as written.
         url = lookup.url
@@ -71,9 +81,22 @@ class Enricher:
         if not self.cfg.lookups:
             return {}
         context: dict[str, Any] = {}
-        async with httpx.AsyncClient() as client:
-            tasks = [run_lookup(client, lk, record) for lk in self.cfg.lookups]
+        # One client per distinct verify_tls setting — usually just one — so an
+        # internal lookup with its own CA can opt out of verification without
+        # weakening the others.
+        clients: dict[bool, httpx.AsyncClient] = {}
+
+        async def run(lookup: LookupConfig) -> tuple[str, Any]:
+            client = clients.setdefault(
+                lookup.verify_tls, httpx.AsyncClient(verify=lookup.verify_tls)
+            )
+            return await run_lookup(client, lookup, record)
+
+        try:
+            tasks = [run(lk) for lk in self.cfg.lookups]
             results = await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            await asyncio.gather(*(c.aclose() for c in clients.values()))
         for lookup, outcome in zip(self.cfg.lookups, results, strict=True):
             if isinstance(outcome, BaseException):
                 if not lookup.optional:
@@ -101,7 +124,9 @@ class Enricher:
         static = {**self.cfg.static_context, **(static_override or {})}
         scope = {
             "record": payload,
-            "raw": record.payload,
+            # Skips the include_fields whitelist but redact_fields is still masked —
+            # a template must never be able to route around that guarantee.
+            "raw": redact(record.payload, self.cfg.redact_fields),
             "context": context,
             "static": static,
             "id": record.id,

@@ -68,6 +68,21 @@ def test_run_endpoint_publishes(settings, chat_response):
     assert Path(body["results"][0]["sink_ref"]).is_file()
 
 
+def test_oversized_body_is_rejected(settings):
+    settings.server.max_body_bytes = 64
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/v1/process", json={"payload": {"id": "a1", "blob": "x" * 200}})
+    assert response.status_code == 413
+    assert "max_body_bytes" in response.json()["detail"]
+
+
+def test_body_under_the_limit_is_unaffected(settings):
+    settings.server.max_body_bytes = 64
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/healthz")
+    assert response.status_code == 200
+
+
 def test_api_key_is_enforced_when_configured(settings, monkeypatch):
     settings.server.api_key_env = "AIGW_TEST_KEY"
     monkeypatch.setenv("AIGW_TEST_KEY", "letmein")

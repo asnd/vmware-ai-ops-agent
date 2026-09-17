@@ -5,7 +5,7 @@ import pytest
 import respx
 
 from aigw.config import EnrichmentConfig
-from aigw.enrich import REDACTED, Enricher, project
+from aigw.enrich import REDACTED, Enricher, project, redact
 from aigw.models import Record
 
 
@@ -13,6 +13,11 @@ def test_project_redacts_and_filters():
     cfg = EnrichmentConfig(include_fields=["a", "password"], redact_fields=["password"])
     out = project({"a": 1, "b": 2, "password": "hunter2"}, cfg)
     assert out == {"a": 1, "password": REDACTED}
+
+
+def test_redact_masks_without_filtering_fields():
+    out = redact({"a": 1, "b": 2, "password": "hunter2"}, ["password"])
+    assert out == {"a": 1, "b": 2, "password": REDACTED}
 
 
 async def test_enrich_renders_the_prompt():
@@ -51,6 +56,38 @@ async def test_unknown_template_variable_is_an_error():
         await Enricher(cfg).enrich(Record(payload={}))
 
 
+async def test_raw_scope_is_redacted_but_not_field_filtered():
+    cfg = EnrichmentConfig(
+        include_fields=["a"],
+        redact_fields=["password"],
+        prompt={"template": "{{ raw | tojson(indent=None) }}"},
+    )
+    enriched = await Enricher(cfg).enrich(Record(payload={"a": 1, "b": 2, "password": "hunter2"}))
+    # `record` would have dropped "b" (not in include_fields); `raw` keeps it —
+    # but the secret must be masked in both, or redact_fields is a lie.
+    assert "hunter2" not in enriched.user_prompt
+    assert '"b": 2' in enriched.user_prompt
+    assert REDACTED in enriched.user_prompt
+
+
+async def test_lookup_url_placeholder_survives_a_payload_id_field():
+    # record.payload carries its own "id" (the common shape once sources.py has
+    # preserved an upstream id) alongside the field the lookup URL interpolates.
+    cfg = EnrichmentConfig(
+        lookups=[{"name": "cmdb", "url": "http://cmdb/hosts/{host}/{id}"}],
+        prompt={"template": "ok"},
+    )
+    with respx.mock:
+        route = respx.get("http://cmdb/hosts/esxi-07/alert-1").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        enriched = await Enricher(cfg).enrich(
+            Record(id="alert-1", payload={"id": "alert-1", "host": "esxi-07"})
+        )
+    assert route.called
+    assert enriched.context["cmdb"] == {}
+
+
 @respx.mock
 async def test_lookup_result_lands_in_the_context():
     respx.get("http://cmdb/hosts/esxi-07").mock(
@@ -74,6 +111,22 @@ async def test_optional_lookup_failure_is_tolerated():
     )
     enriched = await Enricher(cfg).enrich(Record(payload={}))
     assert enriched.context["cmdb"] is None
+
+
+@respx.mock
+async def test_lookups_with_different_verify_tls_both_resolve():
+    respx.get("http://cmdb/a").mock(return_value=httpx.Response(200, json={"v": "a"}))
+    respx.get("http://cmdb/b").mock(return_value=httpx.Response(200, json={"v": "b"}))
+    cfg = EnrichmentConfig(
+        lookups=[
+            {"name": "secure", "url": "http://cmdb/a", "verify_tls": True},
+            {"name": "insecure", "url": "http://cmdb/b", "verify_tls": False},
+        ],
+        prompt={"template": "ok"},
+    )
+    enriched = await Enricher(cfg).enrich(Record(payload={}))
+    assert enriched.context["secure"] == {"v": "a"}
+    assert enriched.context["insecure"] == {"v": "b"}
 
 
 @respx.mock
