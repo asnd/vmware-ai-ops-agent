@@ -104,6 +104,38 @@ class TestBaseMCPClientHeaders:
         sent_headers = call_kwargs.get("headers", {})
         assert sent_headers.get("mcp-session-id") == "session-xyz"
 
+    def test_rejects_non_http_base_url(self):
+        with pytest.raises(ValueError, match="HTTP"):
+            BaseMCPClient(base_url="file:///tmp/mcp.sock")
+
+    def test_rejects_embedded_credentials(self):
+        with pytest.raises(ValueError, match="credentials"):
+            BaseMCPClient(base_url="http://" + "user:pass@" + "example.com")
+
+    @pytest.mark.asyncio
+    async def test_connect_closes_client_on_notify_failure(self):
+        init_resp = self._make_init_response()
+        failed_notify = MagicMock()
+        failed_notify.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "boom",
+            request=httpx.Request("POST", "http://aria:8080/mcp"),
+            response=httpx.Response(500),
+        )
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(side_effect=[init_resp, failed_notify])
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value = mock_http
+            client = AriaOpsMCPClient(base_url="http://aria:8080", auth_token="tok")
+
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.connect()
+
+            mock_http.aclose.assert_awaited_once()
+            assert client._client is None
+            assert client._session_id is None
+
 
 # ---------------------------------------------------------------------------
 # SSE response decoding

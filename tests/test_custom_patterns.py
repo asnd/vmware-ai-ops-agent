@@ -13,6 +13,7 @@ from vmware_ai_ops_agent.correlation.engine import CorrelationEngine
 from vmware_ai_ops_agent.correlation.patterns import (
     KNOWN_PATTERNS,
     PatternCategory,
+    PatternMatcher,
     load_custom_patterns,
 )
 
@@ -107,6 +108,50 @@ def test_engine_uses_custom_patterns(tmp_path):
     matched = [i for i in result.issues if i.pattern and i.pattern.id == "custom-vmfs-heap"]
     assert len(matched) == 1
     assert matched[0].severity == Severity.CRITICAL
+
+
+def test_pattern_matcher_skips_invalid_log_regex(tmp_path):
+    yaml = """
+patterns:
+  - id: invalid-regex
+    name: Invalid Regex
+    category: storage
+    severity: WARNING
+    log_patterns:
+      - "[unterminated"
+      - "valid storage error"
+"""
+    patterns = load_custom_patterns(_write(tmp_path, yaml))
+    matcher = PatternMatcher(patterns)
+
+    log = LogEntry(
+        id="log-1",
+        timestamp=datetime.utcnow(),
+        source="esxi-01",
+        source_type="esxi",
+        text="valid storage error detected",
+    )
+
+    matches = matcher.match_logs([log])
+    assert len(matches) == 1
+    assert matches[0][0].id == "invalid-regex"
+
+
+def test_pattern_matcher_skips_oversized_log_regex(tmp_path):
+    yaml = f"""
+patterns:
+  - id: oversized-regex
+    name: Oversized Regex
+    category: storage
+    severity: WARNING
+    log_patterns:
+      - "{'a' * 501}"
+"""
+    patterns = load_custom_patterns(_write(tmp_path, yaml))
+    matcher = PatternMatcher(patterns)
+
+    assert matcher.match_logs([]) == []
+    assert matcher._compiled_patterns["oversized-regex"] == []
 
 
 def test_agent_merges_custom_patterns(test_settings, tmp_path):
