@@ -14,7 +14,7 @@ import structlog
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from ..config import KnowledgeBaseConfig, VectorDBConfig
 from .models import AnalysisResult
@@ -75,7 +75,7 @@ class KnowledgeBase:
         self._signing_secret = signing_secret
         self._db: FAISS | None = None
         self._initialized = False
-        self._embeddings = None
+        self._embeddings: OpenAIEmbeddings | None = None
         self._pending_docs: list[Document] = []
         self._batch_size = 10
         self._dirty = False
@@ -191,7 +191,7 @@ class KnowledgeBase:
                 logger.warning("No API key provided, knowledge base disabled")
                 return
 
-            self._embeddings = OpenAIEmbeddings(api_key=self.api_key)
+            self._embeddings = OpenAIEmbeddings(api_key=SecretStr(self.api_key))
 
             persist_dir = Path(self.vector_config.persist_directory)
             index_file = persist_dir / "index.faiss"

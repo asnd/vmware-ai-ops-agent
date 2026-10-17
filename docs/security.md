@@ -79,7 +79,7 @@ Remediation is defense-in-depth and **off by default**:
    `should_remediate()` routes to `END`.
 3. **Allow / forbid lists** — `ActionExecutor` skips actions not in
    `allowed_actions` and any in `forbidden_actions` (default forbids
-   `vm_power_off`, `host_maintenance_mode`).
+   `vm_power_off`, `host_maintenance`).
 4. **Approval gating** — only `NOTIFY` and `INVESTIGATE` are "safe"; everything
    else requires an approval callback, and a missing callback means the action is
    skipped, not run.

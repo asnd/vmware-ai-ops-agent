@@ -37,8 +37,8 @@ def _to_float(value: Any) -> float | None:
 def _resource_name(raw: dict[str, Any]) -> str:
     resource_key = raw.get("resourceKey", raw)
     if isinstance(resource_key, dict):
-        return resource_key.get("name", raw.get("name", "Unknown"))
-    return raw.get("name", "Unknown")
+        return str(resource_key.get("name", raw.get("name", "Unknown")))
+    return str(raw.get("name", "Unknown"))
 
 
 def _parse_capacity(resource_id: str, name: str, data: dict[str, Any]) -> CapacityEntry:

@@ -145,7 +145,7 @@ patterns:
     category: storage
     severity: WARNING
     log_patterns:
-      - "{'a' * 501}"
+      - "{"a" * 501}"
 """
     patterns = load_custom_patterns(_write(tmp_path, yaml))
     matcher = PatternMatcher(patterns)

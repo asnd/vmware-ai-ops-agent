@@ -219,7 +219,7 @@ agent:
       - snapshot_cleanup
     forbidden_actions:
       - vm_power_off
-      - host_maintenance_mode
+      - host_maintenance
 ```
 
 ## Known Issue Patterns

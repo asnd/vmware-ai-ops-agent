@@ -32,7 +32,7 @@ class NotificationService:
             await self._http_client.aclose()
 
     async def notify_issue(self, issue: CorrelatedIssue) -> dict[str, bool]:
-        results = {}
+        results: dict[str, bool] = {}
 
         if self.config.slack.enabled:
             success = await self._send_slack(
@@ -52,7 +52,7 @@ class NotificationService:
         return results
 
     async def notify_analysis(self, analysis: AnalysisResult) -> dict[str, bool]:
-        results = {}
+        results: dict[str, bool] = {}
 
         if analysis.urgency not in (Urgency.CRITICAL, Urgency.HIGH):
             return results
@@ -69,6 +69,8 @@ class NotificationService:
             webhook_url = self.config.slack.webhook_url.get_secret_value()
             if not webhook_url:
                 return False
+            if self._http_client is None:
+                raise RuntimeError("Notification service must be entered before sending")
 
             payload = {"channel": self.config.slack.channel, "text": message, "mrkdwn": True}
             response = await self._http_client.post(webhook_url, json=payload)

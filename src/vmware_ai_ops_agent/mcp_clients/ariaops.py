@@ -94,11 +94,11 @@ class AriaOpsMCPClient(BaseMCPClient):
 
     async def get_resource(self, resource_id: str) -> dict[str, Any]:
         """Get a single resource by ID."""
-        return await self._call_tool("get_resource", {"resource_id": resource_id})
+        return await self._call_object_tool("get_resource", {"resource_id": resource_id})
 
     async def get_resource_properties(self, resource_id: str) -> dict[str, Any]:
         """Get properties for a resource."""
-        return await self._call_tool("get_resource_properties", {"resource_id": resource_id})
+        return await self._call_object_tool("get_resource_properties", {"resource_id": resource_id})
 
     # --- Alert Tools ---
 
@@ -120,7 +120,7 @@ class AriaOpsMCPClient(BaseMCPClient):
 
     async def get_alert(self, alert_id: str) -> dict[str, Any]:
         """Get a single alert by ID."""
-        return await self._call_tool("get_alert", {"alert_id": alert_id})
+        return await self._call_object_tool("get_alert", {"alert_id": alert_id})
 
     # --- Metrics Tools ---
 
@@ -146,7 +146,7 @@ class AriaOpsMCPClient(BaseMCPClient):
             args["begin"] = begin
         if end is not None:
             args["end"] = end
-        return await self._call_tool("get_resource_stats", args)
+        return await self._call_object_tool("get_resource_stats", args)
 
     async def get_latest_stats(
         self,
@@ -154,7 +154,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         stat_keys: list[str],
     ) -> dict[str, Any]:
         """Get latest stat values for a resource."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "get_latest_stats",
             {"resource_id": resource_id, "stat_keys": stat_keys},
         )
@@ -163,7 +163,7 @@ class AriaOpsMCPClient(BaseMCPClient):
 
     async def get_capacity_remaining(self, resource_id: str) -> dict[str, Any]:
         """Get capacity remaining for a resource."""
-        return await self._call_tool("get_capacity_remaining", {"resource_id": resource_id})
+        return await self._call_object_tool("get_capacity_remaining", {"resource_id": resource_id})
 
     async def get_capacity_forecast(
         self,
@@ -172,7 +172,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         days_ahead: int = 30,
     ) -> dict[str, Any]:
         """Get capacity forecast for a resource."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "get_capacity_forecast",
             {"resource_id": resource_id, "stat_key": stat_key, "days_ahead": days_ahead},
         )
@@ -185,7 +185,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         interval_count: int = 7,
     ) -> dict[str, Any]:
         """Get trend analysis for a resource metric."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "get_trend_analysis",
             {
                 "resource_id": resource_id,
@@ -203,7 +203,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         status: str,
     ) -> dict[str, Any]:
         """Modify alert status (cancel/suspend)."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "modify_alerts",
             {"alert_ids": alert_ids, "status": status},
         )
@@ -214,7 +214,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         duration_minutes: int = 60,
     ) -> dict[str, Any]:
         """Put resources into maintenance mode."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "mark_resources_maintained",
             {"resource_ids": resource_ids, "duration_minutes": duration_minutes},
         )
@@ -224,7 +224,7 @@ class AriaOpsMCPClient(BaseMCPClient):
         resource_ids: list[str],
     ) -> dict[str, Any]:
         """Remove resources from maintenance mode."""
-        return await self._call_tool(
+        return await self._call_object_tool(
             "unmark_resources_maintained",
             {"resource_ids": resource_ids},
         )
@@ -249,7 +249,7 @@ class AriaOpsMCPClient(BaseMCPClient):
 
         all_resources: list[ResourceHealth] = []
         for raw_list in resource_lists:
-            if isinstance(raw_list, Exception):
+            if isinstance(raw_list, BaseException):
                 logger.error("Resource collection failed", error=str(raw_list))
                 continue
             for item in raw_list:

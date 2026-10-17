@@ -73,7 +73,7 @@ agent:
     # Actions that are NEVER allowed (safety guard)
     forbidden_actions:
       - vm_power_off
-      - host_maintenance_mode
+      - host_maintenance
 
 # Notification Configuration
 notifications:

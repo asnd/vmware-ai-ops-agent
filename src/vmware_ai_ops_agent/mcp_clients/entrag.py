@@ -50,9 +50,15 @@ class EntragMCPClient(BaseMCPClient):
 
         if isinstance(result, dict):
             if "results" in result:
-                return result["results"]
+                items = result["results"]
+                if not isinstance(items, list):
+                    raise ValueError("EntRAG results must be a list")
+                return items
             if "chunks" in result:
-                return result["chunks"]
+                items = result["chunks"]
+                if not isinstance(items, list):
+                    raise ValueError("EntRAG chunks must be a list")
+                return items
             if "raw_text" in result:
                 return [{"content": result["raw_text"], "title": "KB Result", "score": 1.0}]
             if "content" in result or "text" in result:
@@ -88,10 +94,10 @@ class EntragMCPClient(BaseMCPClient):
 
     async def get_ingestion_status(self) -> dict[str, Any]:
         """Get the status of the EntRAG knowledge base index."""
-        return await self._call_tool("ingestion_status")
+        return await self._call_object_tool("ingestion_status")
 
     # --- Scrape Status ---
 
     async def get_scrape_status(self) -> dict[str, Any]:
         """Get the status of the KB article scraper."""
-        return await self._call_tool("scrape_status")
+        return await self._call_object_tool("scrape_status")

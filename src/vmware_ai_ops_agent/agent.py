@@ -68,7 +68,7 @@ class VMwareAIOpsAgent:
         self.state = AgentState()
         self.correlation_engine = CorrelationEngine(patterns=self._load_patterns())
         self.llm_engine = LLMAnalysisEngine(settings.llm)
-        self._metrics_server = None
+        self._metrics_server = False
 
         self.knowledge_base = KnowledgeBase(
             settings.vector_db,
@@ -379,6 +379,9 @@ class VMwareAIOpsAgent:
             result = await self.graph.ainvoke(self._initial_graph_state())
 
             analysis = result.get("analysis_result")
+
+            if analysis is not None and not isinstance(analysis, AnalysisResult):
+                raise ValueError("Graph returned an invalid analysis result")
 
             if analysis:
                 self.state.last_analysis = analysis
