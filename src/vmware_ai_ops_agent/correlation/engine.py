@@ -117,7 +117,7 @@ class CorrelationEngine:
             pattern_evidence[pattern.id]["pattern"] = pattern
 
         for _pattern_id, evidence in pattern_evidence.items():
-            pattern = evidence.get("pattern")
+            pattern = evidence["pattern"]
             if not pattern:
                 continue
 

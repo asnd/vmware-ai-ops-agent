@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from vmware_ai_ops_agent.analysis.models import ActionType
 
 
 class VROpsConfig(BaseModel):
@@ -66,8 +68,17 @@ class AutoRemediateConfig(BaseModel):
         default_factory=lambda: ["vmotion", "drs_rebalance", "snapshot_cleanup"]
     )
     forbidden_actions: list[str] = Field(
-        default_factory=lambda: ["vm_power_off", "host_maintenance_mode"]
+        default_factory=lambda: ["vm_power_off", "host_maintenance"]
     )
+
+    @field_validator("allowed_actions", "forbidden_actions")
+    @classmethod
+    def validate_action_names(cls, actions: list[str]) -> list[str]:
+        valid = {action.value for action in ActionType} | {"vm_power_off"}
+        unknown = sorted(set(actions) - valid)
+        if unknown:
+            raise ValueError(f"Unknown action names: {', '.join(unknown)}")
+        return actions
 
 
 class AgentConfig(BaseModel):

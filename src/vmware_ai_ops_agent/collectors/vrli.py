@@ -68,6 +68,8 @@ class VRLICollector:
             await self._client.aclose()
 
     async def _authenticate(self) -> None:
+        if self._client is None:
+            raise RuntimeError("Collector must be entered before authentication")
         auth_url = f"{self.base_url}/sessions"
         payload = {
             "username": self.config.username,
@@ -107,6 +109,8 @@ class VRLICollector:
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         await self._ensure_authenticated()
+        if self._client is None:
+            raise RuntimeError("Collector must be entered before requests")
         url = f"{self.base_url}/{endpoint}"
         headers = self._get_headers()
         try:
@@ -114,7 +118,10 @@ class VRLICollector:
                 method, url, params=params, json=json_data, headers=headers
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object from vRLI")
+            return data
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
                 # Force re-authentication on the next retry attempt

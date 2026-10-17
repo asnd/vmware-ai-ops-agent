@@ -5,6 +5,7 @@ Logging configuration for VMware AI Ops Agent.
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
 import structlog
 
@@ -31,6 +32,7 @@ def setup_logging(
         file_handler.setLevel(log_level)
         logging.getLogger().addHandler(file_handler)
 
+    renderer: structlog.processors.JSONRenderer | structlog.dev.ConsoleRenderer
     if log_format == "json":
         renderer = structlog.processors.JSONRenderer()
     else:
@@ -58,4 +60,4 @@ def setup_logging(
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Get a structured logger instance."""
-    return structlog.get_logger(name)
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))

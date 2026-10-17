@@ -15,11 +15,11 @@ lint:python:
   stage: lint
   image: python:${PYTHON_VERSION}-slim
   before_script:
-    - pip install ruff mypy
+    - pip install -e ".[dev]"
   script:
     - ruff check src/ tests/
     - ruff format --check src/ tests/
-    - mypy src/ || true
+    - mypy src/
 
 # Test Stage
 test:unit:

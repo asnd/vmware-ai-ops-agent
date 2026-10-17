@@ -152,7 +152,7 @@ def create_agent_graph(
 
         if state.get("kb_results"):
             context_parts.append("### Similar Past Incidents:")
-            for hit in state["kb_results"]:
+            for hit in state["kb_results"] or []:
                 meta = hit.get("metadata", {})
                 summary = meta.get("summary") or hit.get("content", "No content")
                 context_parts.append(f"- {summary} (Score: {hit.get('similarity_score', 0):.2f})")
@@ -162,7 +162,7 @@ def create_agent_graph(
 
         if state.get("search_results"):
             context_parts.append("\n### Knowledge Base Articles:")
-            for hit in state["search_results"]:
+            for hit in state["search_results"] or []:
                 title = hit.get("title", "Untitled")
                 link = hit.get("link", "")
                 section = hit.get("section_type", "")
@@ -175,7 +175,7 @@ def create_agent_graph(
 
         if state.get("capacity_data"):
             context_parts.append("\n### Capacity Analysis:")
-            for cap in state["capacity_data"]:
+            for cap in state["capacity_data"] or []:
                 if isinstance(cap, dict):
                     resource_name = cap.get("resource_name", cap.get("resourceName", "Unknown"))
                     remaining = cap.get("remaining_capacity", cap.get("remainingCapacity", "N/A"))

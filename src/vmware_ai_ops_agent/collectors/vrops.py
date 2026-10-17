@@ -78,6 +78,8 @@ class VROpsCollector:
 
     async def _authenticate(self) -> None:
         """Authenticate with vROps."""
+        if self._client is None:
+            raise RuntimeError("Collector must be entered before authentication")
         auth_url = f"{self.base_url}/auth/token/acquire"
         payload = {
             "username": self.config.username,
@@ -119,13 +121,18 @@ class VROpsCollector:
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         await self._ensure_authenticated()
+        if self._client is None:
+            raise RuntimeError("Collector must be entered before requests")
         url = f"{self.base_url}/{endpoint}"
         try:
             response = await self._client.request(
                 method, url, params=params, json=json_data, headers=self._get_headers()
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object from vROps")
+            return data
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
                 # Force re-authentication on the next retry attempt
@@ -417,16 +424,12 @@ class VROpsCollector:
         ]
 
         # Also fetch alerts, recommendations, anomalies in parallel
-        all_results = await asyncio.gather(
-            *resource_tasks,
+        resource_lists, alerts, recommendations, anomalies = await asyncio.gather(
+            asyncio.gather(*resource_tasks),
             self.get_alerts(),
             self.get_recommendations(),
             self.get_anomalies(),
         )
-
-        # Unpack results: first N are resource lists, last 3 are alerts/recs/anomalies
-        resource_lists = all_results[: len(resource_kinds)]
-        alerts, recommendations, anomalies = all_results[-3:]
 
         # Flatten resource lists
         all_resources = [r for resource_list in resource_lists for r in resource_list]

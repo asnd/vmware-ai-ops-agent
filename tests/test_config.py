@@ -4,8 +4,11 @@ Tests for configuration management.
 
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
+import yaml
+from pydantic import ValidationError
 
 from vmware_ai_ops_agent.config import (
     AutoRemediateConfig,
@@ -42,7 +45,23 @@ class TestSettings:
         assert config.enabled is False
         assert config.require_approval is True
         assert "vm_power_off" in config.forbidden_actions
+        assert "host_maintenance" in config.forbidden_actions
         assert "vmotion" in config.allowed_actions
+
+    @pytest.mark.parametrize("field", ["allowed_actions", "forbidden_actions"])
+    def test_reject_unknown_action_names(self, field):
+        with pytest.raises(ValidationError, match="Unknown action names"):
+            AutoRemediateConfig(**{field: ["host_maintenance_mode"]})
+
+    def test_shipped_kubernetes_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("VMWARE_AI_LLM__API_KEY", "synthetic-test-key")
+        root = Path(__file__).resolve().parents[1]
+        manifests = yaml.safe_load_all((root / "deploy/kubernetes/deployment.yaml").read_text())
+        config_map = next(doc for doc in manifests if doc["kind"] == "ConfigMap")
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text(config_map["data"]["settings.yaml"])
+        settings = Settings.from_yaml(str(config_file))
+        assert "host_maintenance" in settings.agent.auto_remediate.forbidden_actions
 
     def test_llm_config_defaults(self):
         """LLM config should have reasonable defaults."""

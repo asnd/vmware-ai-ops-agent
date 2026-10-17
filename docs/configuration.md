@@ -106,7 +106,7 @@ or OpenAI itself. The `api_key` doubles as the embedding key for the FAISS KB.
   - `require_approval=true` — non-safe actions need an approval callback.
   - `max_actions_per_hour=10` — rate limit.
   - `allowed_actions=[vmotion, drs_rebalance, snapshot_cleanup]`.
-  - `forbidden_actions=[vm_power_off, host_maintenance_mode]` — never run.
+  - `forbidden_actions=[vm_power_off, host_maintenance]` — never run.
 
 ### `notifications`
 - `slack`: `enabled=false` `webhook_url` `channel="#vmware-ops"` `mention_on_critical="@oncall"`.

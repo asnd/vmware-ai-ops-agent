@@ -40,6 +40,8 @@ class VCenterClient:
             await self._client.aclose()
 
     async def _authenticate(self) -> None:
+        if self._client is None:
+            raise RuntimeError("Client must be entered before authentication")
         try:
             response = await self._client.post(
                 f"{self.base_url}/session",
@@ -57,6 +59,8 @@ class VCenterClient:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
     async def _request(self, method: str, endpoint: str, **kwargs) -> dict[str, Any] | list | None:
+        if self._client is None:
+            raise RuntimeError("Client must be entered before requests")
         url = f"{self.base_url}/{endpoint}"
         response = await self._client.request(method, url, headers=self._get_headers(), **kwargs)
         response.raise_for_status()
@@ -64,15 +68,21 @@ class VCenterClient:
 
     async def get_vms(self) -> list[dict[str, Any]]:
         result = await self._request("GET", "vcenter/vm")
-        return result if result else []
+        if result is not None and not isinstance(result, list):
+            raise ValueError("Expected a VM list from vCenter")
+        return result or []
 
     async def get_hosts(self) -> list[dict[str, Any]]:
         result = await self._request("GET", "vcenter/host")
-        return result if result else []
+        if result is not None and not isinstance(result, list):
+            raise ValueError("Expected a host list from vCenter")
+        return result or []
 
     async def get_datastores(self) -> list[dict[str, Any]]:
         result = await self._request("GET", "vcenter/datastore")
-        return result if result else []
+        if result is not None and not isinstance(result, list):
+            raise ValueError("Expected a datastore list from vCenter")
+        return result or []
 
     async def vmotion_vm(self, vm_id: str, target_host: str) -> dict[str, Any]:
         if self.config.dry_run:
@@ -82,6 +92,8 @@ class VCenterClient:
         logger.info("Initiating vMotion", vm_id=vm_id, target_host=target_host)
         payload = {"placement": {"host": target_host}}
         result = await self._request("POST", f"vcenter/vm/{vm_id}/relocate", json=payload)
+        if result is not None and not isinstance(result, dict):
+            raise ValueError("Expected a relocation result object from vCenter")
         return result or {}
 
     async def storage_vmotion_vm(self, vm_id: str, target_datastore: str) -> dict[str, Any]:
@@ -101,6 +113,8 @@ class VCenterClient:
         logger.info("Initiating Storage vMotion", vm_id=vm_id, target_datastore=target_datastore)
         payload = {"placement": {"datastore": target_datastore}}
         result = await self._request("POST", f"vcenter/vm/{vm_id}/relocate", json=payload)
+        if result is not None and not isinstance(result, dict):
+            raise ValueError("Expected a relocation result object from vCenter")
         return result or {}
 
     async def trigger_drs_recommendation(self, cluster_id: str) -> dict[str, Any]:

@@ -134,6 +134,15 @@ class BaseMCPClient:
             return _parse_sse_body(response.text)
         return response.json()
 
+    async def _call_object_tool(
+        self, tool_name: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Require an object response for tools with an object-shaped contract."""
+        result = await self._call_tool(tool_name, arguments)
+        if not isinstance(result, dict):
+            raise ValueError(f"MCP tool {tool_name} returned a non-object result")
+        return result
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
